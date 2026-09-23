@@ -1535,3 +1535,11 @@ Dart 侧在 `HomeShell` 里落地：`initState` 订阅 `NativeBridge.actions`，
   `lib/features/timetable/{course_editor_page,course_form,week_view_page,week_layout}.dart`、`lib/features/widgets/add_widget_helper.dart`、
   `lib/features/import/adapters/{school_adapter,school_registry,zfsoft_adapter}.dart`（只改注释）、`assets/themes/themes.json`（主题名）；
   `test/theme_registry_test.dart`；仓库根 `README.md`。
+
+### Phase D（Fable，2026-09-23）集成与交付
+- 版本 `1.3.0+7`，`appVersion` 常量同步为 1.3.0。仓库根 `git init`（分支 main），`.gitignore` 排除 keys/、key.properties、dist/、shots/、.tmpbuild/、build 产物、design/.omx。首个提交 8ad7a80。
+- 发布包：`dist/简课表-v1.3.0.apk`（universal，58,240,362 B）、`dist/简课表-v1.3.0-arm64.apk`。aapt2：versionCode 7、versionName 1.3.0、label 简课表。
+- 模拟器 shu35（API 35）从 release 签名的 1.2.0 `adb install -r` 覆盖安装：示例课表、学期设置、主题全部保留；首启弹隐私说明，同意后进入周视图。
+- 真机操作验证（截图 shots/v130/）：设置页新分组（记住教务登录、从文件导入课表、检查更新=未配置更新源禁用态、隐私说明、反馈）；学期设置 → 添加调休/停课 → 保存后周视图日期头显示「停课」且整列不画课、今日页显示「今天停课。」、桌面小组件当天显示无课；导入课表页显示「上海大学 已验证」+「我的学校不在列表」→ 输入含 /jwglxt 的网址识别为「正方教务（实验）」；周视图长按空格子打开新建课程并带入周六/第 1 节，编辑器有「复制到其他星期」「保存并继续添加」和教师/地点历史补全提示。
+- 没验证的：真实教务登录到导入（本机连不上 shu.edu.cn）、扫码外跳、Cookie 清理、诊断样本分享面板、单表分享/导入的系统文件选择器、检查更新的真实网络请求（更新源仍是 OWNER/REPO 占位）。
+- 遗留：小组件在停课日显示「这天没有课」而不是「停课」（Kotlin 未读 label）；更新源、Issues 地址、隐私说明里的开发者信息需要用户建好 GitHub 仓库后一次性替换；keystore 口令仍在 keys/README.txt 明文里，需要用户自己改口令并异地备份。
