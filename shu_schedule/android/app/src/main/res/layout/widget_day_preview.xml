@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 只用于小组件选择器的预览（previewLayout，API 31+）。
+     真正的 widget_day 布局里课程是一个 ListView，预览时没有 RemoteViewsService，
+     列表会是一片空白，所以这里单独写一份带 3 行示例内容的静态布局。
+     低版本（API 30-）不认 previewLayout，走 day_widget_info 里的 previewImage。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_rounded"
+    android:backgroundTint="#FFFFFF"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
+    android:paddingLeft="10dp"
+    android:paddingRight="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:textSize="16sp"
+            android:textColor="#933E6A"
+            android:text="◀" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="#342632"
+                android:text="9月17日 周四" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textSize="11sp"
+                android:textColor="#68505F"
+                android:text="第 1 周 · 今天" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:textSize="16sp"
+            android:textColor="#933E6A"
+            android:text="▶" />
+    </LinearLayout>
+
+    <!-- 示例第 1 行：当前 / 下一节的高亮样式。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:paddingLeft="4dp"
+        android:paddingRight="4dp"
+        android:background="#F4E6EE">
+
+        <TextView
+            android:layout_width="4dp"
+            android:layout_height="28dp"
+            android:text=""
+            android:background="#D2D0F1" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"
+            android:minWidth="76dp"
+            android:maxLines="1"
+            android:textSize="12sp"
+            android:textColor="#933E6A"
+            android:text="08:00-09:40" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="8dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#342632"
+                android:text="大学英语（四）" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textSize="11sp"
+                android:textColor="#68505F"
+                android:text="东区 J-204" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 示例第 2 行。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:paddingLeft="4dp"
+        android:paddingRight="4dp">
+
+        <TextView
+            android:layout_width="4dp"
+            android:layout_height="28dp"
+            android:text=""
+            android:background="#B8D8F2" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"
+            android:minWidth="76dp"
+            android:maxLines="1"
+            android:textSize="12sp"
+            android:textColor="#68505F"
+            android:text="13:00-14:40" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="8dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#342632"
+                android:text="数据结构" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textSize="11sp"
+                android:textColor="#68505F"
+                android:text="计算机楼 A-301" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 示例第 3 行：暗示列表还能往下滑。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:paddingLeft="4dp"
+        android:paddingRight="4dp">
+
+        <TextView
+            android:layout_width="4dp"
+            android:layout_height="28dp"
+            android:text=""
+            android:background="#C9E5D2" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"
+            android:minWidth="76dp"
+            android:maxLines="1"
+            android:textSize="12sp"
+            android:textColor="#68505F"
+            android:text="15:00-16:40" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="8dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#342632"
+                android:text="大学物理（二）" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textSize="11sp"
+                android:textColor="#68505F"
+                android:text="东区 J-115" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

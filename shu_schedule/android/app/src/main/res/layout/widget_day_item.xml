@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「简课表」小组件 ListView 的一行课程，由 DayRemoteViewsFactory 填充。
+     所有颜色在运行时按主题 palette 设置，这里的静态值只是 XML 预览兜底。
+     只使用 RemoteViews 支持的 View：LinearLayout / TextView。
+     根节点必须有 id（item_root）：setOnClickFillInIntent 要用它来接模板点击。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingTop="3dp"
+    android:paddingBottom="3dp"
+    android:paddingLeft="4dp"
+    android:paddingRight="4dp">
+
+    <!-- 课程色条。RemoteViews 不支持 <View>，所以用空 TextView 当色块。 -->
+    <TextView
+        android:id="@+id/item_bar"
+        android:layout_width="4dp"
+        android:layout_height="28dp"
+        android:text=""
+        android:background="#00000000" />
+
+    <TextView
+        android:id="@+id/item_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="8dp"
+        android:minWidth="76dp"
+        android:maxLines="1"
+        android:textSize="12sp"
+        tools:text="08:00-09:40" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginLeft="8dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/item_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            tools:text="高等数学 A(一)" />
+
+        <TextView
+            android:id="@+id/item_location"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="11sp"
+            tools:text="东区 J-101" />
+    </LinearLayout>
+</LinearLayout>

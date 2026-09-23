@@ -1,0 +1,25 @@
+# secrets — never commit
+keys/
+shu_schedule/android/key.properties
+*.jks
+*.keystore
+
+# build outputs / temp
+.tmpbuild/
+dist/
+shots/
+shu_schedule/build/
+shu_schedule/.dart_tool/
+shu_schedule/.flutter-plugins*
+shu_schedule/.packages
+shu_schedule/*.iml
+shu_schedule/.idea/
+shu_schedule/android/.gradle/
+shu_schedule/android/local.properties
+shu_schedule/android/app/.cxx/
+shu_schedule/android/**/build/
+shu_schedule/tt.json
+design/.omc/
+*.log
+design/.omx/
+design/.omc/

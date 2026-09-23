@@ -1,0 +1,108 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 教务系统登录 / 抓取课表需要联网。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <application
+        android:label="@string/app_name"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- 点击桌面小组件时 home_widget 用这个 action 拉起 App
+                 （HomeWidgetLaunchIntent.getActivity）。 -->
+            <intent-filter>
+                <action android:name="es.antonborri.home_widget.action.LAUNCH"/>
+            </intent-filter>
+            <!-- 长按 App 图标的三个静态快捷方式（res/xml/shortcuts.xml 里是显式 Intent，
+                 严格说不需要 intent-filter；留着是为了让 action 本身也能被显式声明，
+                 顺带给以后可能出现的外部调用留个口子）。 -->
+            <intent-filter>
+                <action android:name="cn.shu.schedule.action.SHORTCUT_TODAY"/>
+                <action android:name="cn.shu.schedule.action.SHORTCUT_IMPORT"/>
+                <action android:name="cn.shu.schedule.action.SHORTCUT_ADD_WIDGET"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts"/>
+        </activity>
+
+        <!-- ============ 桌面小组件 ============ -->
+        <!-- v1.2.0 起只保留这一个：4x2「简课表」，◀ / ▶ 翻页 + 课程列表可滑动。
+             偏移按 appWidgetId 存在 cn.shu.schedule.widget_page 这个 SharedPreferences 里。
+             翻页广播（cn.shu.schedule.action.WIDGET_PAGE）是显式 Intent 指向本 receiver，
+             不需要 intent-filter。 -->
+        <receiver
+            android:name=".widgets.DayWidgetProvider"
+            android:label="@string/widget_day_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/day_widget_info"/>
+        </receiver>
+
+        <!-- 小组件里那个可滑动的 ListView 的数据源。
+             BIND_REMOTEVIEWS 是系统权限：加上之后只有系统进程能绑定这个 Service。 -->
+        <service
+            android:name=".widgets.DayWidgetService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false"/>
+
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- 教务登录页里的「企业微信 / 微信 / QQ 登录」会跳自定义 scheme，
+             由 url_launcher 交给对应 App（web_login_page.dart）。
+             url_launcher README：Android 11+ 上 canLaunchUrl 需要在这里声明 scheme；
+             现在的代码直接 launchUrl（startActivity 不受包可见性限制），
+             声明是为了以后改用 canLaunchUrl 预判时不会一律返回 false。 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="wxwork"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="weixin"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="mqqapi"/>
+        </intent>
+    </queries>
+</manifest>

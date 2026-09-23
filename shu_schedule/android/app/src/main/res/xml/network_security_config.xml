@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 不少高校的统一身份认证 / 教务系统会经过明文 http 地址
+         （例如某些学校单点登录回跳用的 http://jwxt.xxx.edu.cn/sso/... 地址）。
+         Android 9+ 默认禁止明文流量，这里只对 edu.cn 及其所有子域放行；
+         其他域名（包括 App 自己以后的更新检查）仍然强制 https。
+         IP 直连或非 edu.cn 域名的教务系统暂不放行，等真实样本出现再评估。 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">edu.cn</domain>
+    </domain-config>
+</network-security-config>

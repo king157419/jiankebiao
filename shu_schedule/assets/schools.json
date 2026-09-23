@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "schools": [
+    {
+      "id": "shu",
+      "name": "上海大学",
+      "pinyin": "shang hai da xue",
+      "aliases": ["上大", "SHU"],
+      "type": "zfsoft",
+      "entryUrl": "https://jwxt.shu.edu.cn/",
+      "baseUrl": "https://jwxt.shu.edu.cn/jwglxt",
+      "allowedHosts": ["jwxt.shu.edu.cn"],
+      "overrides": {
+        "description": "本科教学管理信息服务平台（正方教务）· 需统一身份认证登录",
+        "termPresets": [
+          { "id": "shu-2026-autumn", "name": "2026-2027 秋", "startDate": "2026-09-14", "totalWeeks": 18 },
+          { "id": "shu-2027-spring", "name": "2026-2027 春", "startDate": "2027-02-22", "totalWeeks": 18 }
+        ]
+      },
+      "periodProfileId": "default-12",
+      "status": "verified"
+    }
+  ]
+}

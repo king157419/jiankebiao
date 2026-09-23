@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App 显示名（桌面图标下的名字）。和 Dart 侧 lib/core/app_brand.dart 的 AppBrand.name 保持一致。 -->
+    <string name="app_name">简课表</string>
+
+    <!-- v1.2.0 起只剩这一个小组件，所以名字就叫 App 名，在启动器的小组件列表里最好找。 -->
+    <string name="widget_day_label">@string/app_name</string>
+    <string name="widget_day_description">当天课程，◀ ▶ 切换日期，上下滑动看全部。</string>
+
+    <string name="widget_need_refresh">打开 App 刷新课表</string>
+
+    <!-- 小组件的空态。 -->
+    <string name="widget_empty_today_rest">这天没有课，好好休息 ✨</string>
+    <string name="widget_empty_other_day">这天没课</string>
+    <string name="widget_back_to_today">回到今天</string>
+
+    <!-- 长按 App 图标弹出的快捷方式（res/xml/shortcuts.xml）。 -->
+    <string name="shortcut_today_short">今日课程</string>
+    <string name="shortcut_today_long">看今天上什么课</string>
+    <string name="shortcut_import_short">导入课表</string>
+    <string name="shortcut_import_long">从教务系统导入课表</string>
+    <string name="shortcut_add_widget_short">添加桌面小组件</string>
+    <string name="shortcut_add_widget_long">把课表小组件放到桌面</string>
+</resources>

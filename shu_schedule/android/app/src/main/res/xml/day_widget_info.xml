@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「简课表」小组件（v1.2.0 起唯一的一个）。
+     updatePeriodMillis 最小生效值是 30 分钟，跨天刷新另外用 AlarmManager
+     在每天 00:00:30 触发（见 DayWidgetProvider）。
+     ◀ / ▶ 翻页靠 setOnClickPendingIntent 发自定义广播，不需要 Flutter 引擎在跑。
+
+     previewLayout / description / targetCellWidth 都是 API 31+ 才生效；
+     API 30- 的启动器（以及一部分只认老字段的国产启动器，比如 vivo 的「应用挂件」）
+     只看 previewImage，之前指向 @mipmap/ic_launcher 会导致预览就是一个应用图标，
+     所以这里换成专门的 widget_day_preview.png。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="70dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_day"
+    android:previewLayout="@layout/widget_day_preview"
+    android:previewImage="@drawable/widget_day_preview"
+    android:description="@string/widget_day_description"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

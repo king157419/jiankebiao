@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 小组件底板：纯色 + 24dp 圆角。
+     实际颜色由 Kotlin 在运行时用主题 palette.surface 着色：
+     API 31+ 用 setBackgroundTintList 保留圆角；更低版本回退成 setBackgroundColor（直角）。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFFFFFFF" />
+    <corners android:radius="24dp" />
+</shape>

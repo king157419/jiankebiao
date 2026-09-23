@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「简课表」小组件（可翻页 + 课程列表可上下滑动）。
+     所有颜色在 DayWidgetProvider 里按主题 palette 运行时设置，
+     这里的静态颜色只是 XML 预览 / 冷启动兜底。
+     只使用 RemoteViews 支持的 View：LinearLayout / FrameLayout / TextView / ListView。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/day_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_rounded"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
+    android:paddingLeft="10dp"
+    android:paddingRight="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+
+        <!-- 往前翻一天。padding 撑出可点区域（箭头字形本身太小按不中）。 -->
+        <TextView
+            android:id="@+id/day_prev"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:textSize="16sp"
+            android:text="◀" />
+
+        <!-- 点日期块 = 回到今天。 -->
+        <LinearLayout
+            android:id="@+id/day_header"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingLeft="2dp"
+            android:paddingRight="2dp">
+
+            <TextView
+                android:id="@+id/day_header_date"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                tools:text="9月17日 周四" />
+
+            <TextView
+                android:id="@+id/day_header_sub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textSize="11sp"
+                tools:text="第 1 周 · 明天" />
+        </LinearLayout>
+
+        <!-- 只在不是今天时显示的「回到今天」。 -->
+        <TextView
+            android:id="@+id/day_back_today"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:maxLines="1"
+            android:textSize="11sp"
+            android:visibility="gone"
+            tools:text="回到今天" />
+
+        <!-- 往后翻一天。 -->
+        <TextView
+            android:id="@+id/day_next"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:textSize="16sp"
+            android:text="▶" />
+    </LinearLayout>
+
+    <!-- 课程列表和空态必须在同一个父容器里叠着放，setEmptyView 才能正确切换。 -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <!-- 课程列表。数据由 DayWidgetService 的 RemoteViewsFactory 提供，
+             拉高小组件就能看到更多课，装不下时可以上下滑动。 -->
+        <ListView
+            android:id="@+id/day_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:scrollbars="none" />
+
+        <TextView
+            android:id="@+id/day_empty"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textSize="13sp"
+            tools:text="这天没课" />
+    </FrameLayout>
+</LinearLayout>

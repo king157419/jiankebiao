@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>上海大学统一身份认证</title>
+    <link rel="stylesheet" href="/authserver/static/css/login.css">
+    <script src="/authserver/static/js/login.js"></script>
+</head>
+<body class="login-page">
+<div class="login-wrap">
+    <h1>上海大学 · 统一身份认证</h1>
+    <form id="casLoginForm" action="/authserver/login?service=https%3A%2F%2Fjwxt.shu.edu.cn%2Fjwglxt%2Fxtgl%2Findex_initMenu.html" method="post">
+        <div class="form-item">
+            <label for="username">用户登录</label>
+            <input id="username" name="username" type="text" placeholder="学工号" autocomplete="off">
+        </div>
+        <div class="form-item">
+            <input id="password" name="password" type="password" placeholder="密码" autocomplete="off">
+        </div>
+        <div class="form-item tip">
+            首次登录或异地登录需要进行二次验证（短信 / 企业微信）。
+        </div>
+        <input type="hidden" name="lt" value="LT-284719-aBcDeFgHiJkLmNoPqRsT-tpass">
+        <input type="hidden" name="execution" value="e1s1">
+        <input type="hidden" name="_eventId" value="submit">
+        <button type="submit" class="login-btn">登 录</button>
+    </form>
+    <p class="footer">Copyright © Shanghai University · newsso.shu.edu.cn</p>
+</div>
+</body>
+</html>
