@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import 'package:shu_schedule/core/app_state.dart';
 import 'package:shu_schedule/core/storage.dart';
 import 'package:shu_schedule/core/theme/theme_controller.dart';
-import 'package:shu_schedule/features/timetable/today_page.dart';
 import 'package:shu_schedule/features/timetable/week_view_page.dart';
 import 'package:shu_schedule/models/course.dart';
 import 'package:shu_schedule/models/schedule_config.dart';
@@ -219,21 +218,5 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('今日页列出今天的课程、周次与时间', (tester) async {
-    late AppState state;
-    late ThemeController controller;
-    await tester.runAsync(() async {
-      (state, controller) = await buildState();
-    });
-    await pumpPage(tester, state, controller, const TodayPage());
-
-    expect(find.text('高等数学 A(一)'), findsOneWidget);
-    expect(find.textContaining('第 1 周'), findsOneWidget);
-    expect(find.textContaining('08:00-09:40'), findsOneWidget);
-    expect(find.textContaining('J101'), findsOneWidget);
-
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 }

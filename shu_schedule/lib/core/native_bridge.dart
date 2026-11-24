@@ -7,14 +7,16 @@ import 'package:flutter/services.dart';
 ///
 /// 只做两件事：
 /// 1. **请求把小组件加到桌面**（`requestPinAppWidget`），
-///    省得用户自己去桌面翻「小组件 / 应用挂件」二级菜单；
-/// 2. **接收长按 App 图标的快捷方式动作**（`today` / `import` / `add_widget`）——
-///    冷启动时主动来取 [launchAction]，App 已经在跑时由原生反过来调 `onAction`，
-///    从 [actions] 这条流里出来。
+///    省得用户自己去桌面翻「小组件 / 应用挂件」二级菜单；v1.5.0 起
+///    4×2（[pinDay]）和 2×1（[pinNext]）两种都能加，加上以后原生弹 Toast；
+/// 2. **读设备信息**（[deviceInfo]：反馈里的诊断信息，以及添加小组件面板
+///    按手机品牌选手动步骤）。
+///
+/// v1.5.0 删掉了长按图标的快捷方式（`launchAction` / `actions` 那一套）。
 ///
 /// **所有方法都不抛异常**：iOS / 桌面 / 没有这个插件的环境会抛
 /// [MissingPluginException]，老启动器会抛 [PlatformException]，
-/// 一律吞掉并返回 false / null，让调用方走降级路径。
+/// 一律吞掉并返回 false / 空 Map，让调用方走降级路径。
 class NativeBridge {
   /// MethodChannel 名字，和 Kotlin 侧 `MainActivity.CHANNEL` 一致。
   static const String channelName = 'cn.shu.schedule/native';
@@ -22,44 +24,55 @@ class NativeBridge {
   /// 全局单例。测试里请自己 `NativeBridge(channel: ...)` 造一个。
   static final NativeBridge instance = NativeBridge();
 
+  /// [requestPinWidget] 的 `provider`：4×2「简课表」（Kotlin `DayWidgetProvider`）。
+  static const String pinDay = 'day';
+
+  /// [requestPinWidget] 的 `provider`：2×1「下一节课」（Kotlin `NextWidgetProvider`）。
+  static const String pinNext = 'next';
+
   final MethodChannel channel;
 
-  final StreamController<String> _actions =
-      StreamController<String>.broadcast();
+  late final StreamController<String> _pinnedController =
+      StreamController<String>.broadcast(onListen: _attachHandler);
 
   NativeBridge({MethodChannel? channel})
-    : channel = channel ?? const MethodChannel(channelName) {
-    this.channel.setMethodCallHandler(_handleNativeCall);
+    : channel = channel ?? const MethodChannel(channelName);
+
+  /// 原生 `PinResultReceiver` 收到添加成功广播后回传的小组件种类（[pinDay] / [pinNext]）。
+  Stream<String> get pinned {
+    _attachHandler();
+    return _pinnedController.stream;
   }
 
-  /// App 运行期间到达的快捷方式动作（`today` / `import` / `add_widget`）。
-  Stream<String> get actions => _actions.stream;
+  void _attachHandler() {
+    try {
+      channel.setMethodCallHandler(_handleNativeCall);
+    } catch (_) {
+      // Binding 尚未初始化时忽略，真正监听时再挂。
+    }
+  }
+
+  Future<Object?> _handleNativeCall(MethodCall call) async {
+    if (call.method == 'onWidgetPinned') {
+      final provider = call.arguments;
+      if (provider is String && provider.isNotEmpty) {
+        _pinnedController.add(provider);
+      }
+    }
+    return null;
+  }
 
   /// 当前系统 + 启动器支不支持「请求添加小组件」的系统弹窗。
   Future<bool> isPinWidgetSupported() => _invokeBool('isPinWidgetSupported');
 
-  /// 请求系统弹出「添加到桌面」确认框。
+  /// 请求系统弹出「添加到桌面」确认框，[provider] 是 [pinDay] 或 [pinNext]。
   ///
-  /// 返回 true 只代表**弹窗已经弹出来**，用户点没点确认原生也拿不到；
-  /// 返回 false 表示这条路走不通，调用方应该改成显示手动添加的步骤。
-  Future<bool> requestPinWidget() => _invokeBool('requestPinWidget');
-
-  /// 取本次冷启动携带的快捷方式动作；没有（或者不支持）返回 null。
-  ///
-  /// 原生取完就清掉，所以同一次启动只会拿到一次。
-  Future<String?> launchAction() async {
-    try {
-      return await channel.invokeMethod<String>('getLaunchAction');
-    } on MissingPluginException {
-      return null;
-    } on PlatformException catch (e) {
-      debugPrint('[NativeBridge] getLaunchAction 失败：$e');
-      return null;
-    } catch (e) {
-      debugPrint('[NativeBridge] getLaunchAction 异常：$e');
-      return null;
-    }
-  }
+  /// 返回 true 只代表**启动器说它支持**这个功能——确认框不一定真弹出来了
+  /// （有的桌面返回 true 却没反应），用户点了「添加」后原生会自己弹 Toast；
+  /// 返回 false 表示这条路走不通（老系统、启动器不支持、不认识的 provider），
+  /// 调用方应该改成显示手动添加的步骤。
+  Future<bool> requestPinWidget({required String provider}) =>
+      _invokeBool('requestPinWidget', <String, Object?>{'provider': provider});
 
   /// 设备信息（给「反馈 → 复制诊断信息」用）：`release`（Android 版本号，如 `15`）、
   /// `sdkInt`、`manufacturer`、`brand`、`model`。拿不到返回空 Map。
@@ -84,9 +97,9 @@ class NativeBridge {
     }
   }
 
-  Future<bool> _invokeBool(String method) async {
+  Future<bool> _invokeBool(String method, [Object? arguments]) async {
     try {
-      return await channel.invokeMethod<bool>(method) ?? false;
+      return await channel.invokeMethod<bool>(method, arguments) ?? false;
     } on MissingPluginException {
       return false;
     } on PlatformException catch (e) {
@@ -96,21 +109,5 @@ class NativeBridge {
       debugPrint('[NativeBridge] $method 异常：$e');
       return false;
     }
-  }
-
-  Future<dynamic> _handleNativeCall(MethodCall call) async {
-    if (call.method != 'onAction') return null;
-    final arg = call.arguments;
-    if (arg is String && arg.isNotEmpty && !_actions.isClosed) {
-      _actions.add(arg);
-    }
-    return null;
-  }
-
-  /// 只有测试需要；单例的生命周期和进程一样长。
-  @visibleForTesting
-  Future<void> dispose() async {
-    channel.setMethodCallHandler(null);
-    await _actions.close();
   }
 }

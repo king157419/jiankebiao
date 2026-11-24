@@ -119,6 +119,8 @@ void main() {
         now: now,
         version: '9.9.9',
       );
+      expect(text, contains('# 课表导入记录'));
+      expect(text, isNot(contains('诊断样本')));
       expect(text, contains('app: 9.9.9'));
       expect(text, contains('school: shu 上海大学'));
       expect(text, contains('status: 已验证'));

@@ -12,7 +12,7 @@ import 'app_theme.dart';
 const AppTheme builtinShuTheme = AppTheme(
   id: 'shu',
   name: '经典蓝',
-  description: '以 #1F4E9C 为主色的正式清爽风，清晰安排每一天。',
+  description: '沉稳的深蓝，正式清爽，清晰安排每一天。',
   isDark: false,
   colors: ThemeColors(
     primary: Color(0xFF1F4E9C),

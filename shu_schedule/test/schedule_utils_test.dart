@@ -243,6 +243,28 @@ void main() {
       expect(ScheduleUtils.dateOf(config, 0, 0), DateTime(2026, 9, 14));
       expect(ScheduleUtils.dateOf(config, 1, 99), DateTime(2026, 9, 20));
     });
+
+    // v1.5.0：原来和 nearestMonday 放在导入预览页测试里；导入不再猜「最近的周一」，
+    // nearestMonday 删掉了，mondayOf 的覆盖搬到这里。
+    test('mondayOf：一周七天 + 跨月 / 跨年 / 夏令时附近', () {
+      final starts = <DateTime>[
+        DateTime(2026, 9, 14),
+        DateTime(2026, 12, 28),
+        DateTime(2027, 3, 8),
+        DateTime(2027, 3, 22),
+        DateTime(2026, 10, 19),
+        DateTime(2026, 10, 26),
+      ];
+      for (final monday in starts) {
+        for (var i = 0; i < 7; i++) {
+          final d = ScheduleUtils.addDays(monday, i);
+          final got = ScheduleUtils.mondayOf(d);
+          expect(got, monday, reason: '$d');
+          expect(got.weekday, DateTime.monday);
+          expect(got.hour, 0);
+        }
+      }
+    });
   });
 
   group('periodRange', () {
@@ -318,7 +340,7 @@ void main() {
     });
   });
 
-  group('coursesOn / coursesInWeek / nextCourse', () {
+  group('coursesOn / coursesInWeek', () {
     Timetable buildTimetable() {
       return Timetable(
         id: 't1',
@@ -391,18 +413,6 @@ void main() {
         'b',
       ]);
       expect(ScheduleUtils.coursesInWeek(9, tt), isEmpty);
-    });
-
-    test('nextCourse 跳过已开始的课并能跨天查找', () {
-      final tt = buildTimetable();
-      // 第 1 周周一 07:00 → 高数（08:00 开始）。
-      expect(ScheduleUtils.nextCourse(DateTime(2026, 9, 14, 7), tt)?.id, 'a');
-      // 09:00 时高数已开始 → 英语（13:00）。
-      expect(ScheduleUtils.nextCourse(DateTime(2026, 9, 14, 9), tt)?.id, 'b');
-      // 周一晚上 22:00 → 周三体育。
-      expect(ScheduleUtils.nextCourse(DateTime(2026, 9, 14, 22), tt)?.id, 'c');
-      // 学期最后一周之后没有课。
-      expect(ScheduleUtils.nextCourse(DateTime(2027, 5, 1), tt), isNull);
     });
   });
 

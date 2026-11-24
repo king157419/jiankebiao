@@ -121,7 +121,7 @@ class _SchoolSelectPageState extends State<SchoolSelectPage> {
             Text('将按正方新版（jwglxt）尝试导入：\n${entry.baseUrl}'),
             const SizedBox(height: 8),
             Text(
-              '这所学校没有人验证过，导入结果请逐条核对。导入失败时可以导出诊断样本反馈给开发者。',
+              '这所学校没有人验证过，导入结果请逐条核对。导入失败时可以导出导入记录反馈给开发者。',
               style: Theme.of(ctx).textTheme.bodySmall,
             ),
             if (guess.message != null) ...<Widget>[

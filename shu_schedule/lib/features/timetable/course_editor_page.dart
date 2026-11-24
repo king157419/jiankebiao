@@ -7,6 +7,7 @@ import '../../core/schedule_utils.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../models/course.dart';
+import '../settings/week_number_sheet.dart';
 import 'course_form.dart';
 
 /// 新建 / 编辑课程。
@@ -25,11 +26,15 @@ class CourseEditorPage extends StatefulWidget {
   final int? initialDay;
   final int? initialStartPeriod;
 
+  /// 测试用时钟（一张课表都没有时自动建表前弹周次面板的「今天」）；不传用 [DateTime.now]。
+  final DateTime Function()? clock;
+
   const CourseEditorPage({
     super.key,
     this.course,
     this.initialDay,
     this.initialStartPeriod,
+    this.clock,
   });
 
   @override
@@ -515,6 +520,19 @@ class _CourseEditorPageState extends State<CourseEditorPage> {
             newId: appState.newId,
           );
 
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    var showUnconfirmedHint = false;
+    if (existing == null && appState.currentTimetable == null) {
+      final confirmed = await createTimetableWithWeekPrompt(
+        context,
+        appState,
+        today: (widget.clock ?? DateTime.now)(),
+        showSnackBarOnDismiss: false,
+      );
+      if (!mounted) return;
+      showUnconfirmedHint = !confirmed;
+    }
+
     if (existing == null) {
       if (copies.isEmpty) {
         await appState.addCourse(course);
@@ -528,9 +546,27 @@ class _CourseEditorPageState extends State<CourseEditorPage> {
     if (!mounted) return;
     if (continueAdding) {
       _resetForNext(course.name, copies.length);
+      if (showUnconfirmedHint) {
+        messenger?.showSnackBar(
+          const SnackBar(
+            key: ValueKey<String>('term-start-unconfirmed'),
+            content: Text(unconfirmedTermStartHint),
+          ),
+        );
+      }
       return;
     }
     Navigator.of(context).pop(true);
+    if (showUnconfirmedHint) {
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            key: ValueKey<String>('term-start-unconfirmed'),
+            content: Text(unconfirmedTermStartHint),
+          ),
+        );
+    }
   }
 
   /// 「保存并继续添加」之后：保留星期 / 节次 / 周次，清空其余字段。

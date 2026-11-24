@@ -4,12 +4,18 @@ import 'package:provider/provider.dart';
 import '../../core/app_state.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../models/timetable.dart';
-import 'timetable_share.dart';
+import 'ics_export_sheet.dart';
+import 'week_number_sheet.dart';
 
-/// 课表管理：切换、新建、重命名、删除（不能删掉最后一张）、
-/// 分享单张课表、从文件导入课表。
+/// 课表管理：切换、新建、重命名、删除（不能删掉最后一张）、导出到日历（.ics）。
+///
+/// v1.5.0 删掉了「分享此课表」和右上角的「从文件导入课表」（D5）；
+/// 整份数据的导出 / 恢复在设置 →「备份与恢复」。
 class TimetableManagePage extends StatelessWidget {
-  const TimetableManagePage({super.key});
+  /// 测试用时钟（「新建课表」弹周次面板的「今天」）；不传时用 [DateTime.now]。
+  final DateTime Function()? clock;
+
+  const TimetableManagePage({super.key, this.clock});
 
   @override
   Widget build(BuildContext context) {
@@ -19,17 +25,7 @@ class TimetableManagePage extends StatelessWidget {
     final currentId = appState.currentTimetable?.id;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('课表管理'),
-        actions: <Widget>[
-          IconButton(
-            key: const ValueKey<String>('import-timetable-file'),
-            tooltip: '从文件导入课表',
-            icon: const Icon(Icons.file_open_outlined),
-            onPressed: () => importTimetableFromFile(context, appState),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('课表管理')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _create(context, appState),
         icon: const Icon(Icons.add),
@@ -60,7 +56,7 @@ class TimetableManagePage extends StatelessWidget {
                   ),
                   title: Text(tt.name),
                   subtitle: Text(
-                    '${tt.config.name} · ${tt.courses.length} 门课 · '
+                    '${tt.config.name} · ${tt.courseCountText} · '
                     '${tt.config.totalWeeks} 周',
                   ),
                   onTap: () async {
@@ -71,16 +67,16 @@ class TimetableManagePage extends StatelessWidget {
                     onSelected: (v) {
                       if (v == 'rename') {
                         _rename(context, appState, tt);
-                      } else if (v == 'share') {
-                        _share(context, tt);
+                      } else if (v == 'ics') {
+                        showIcsExportSheet(context, timetable: tt);
                       } else if (v == 'delete') {
                         _delete(context, appState, tt);
                       }
                     },
                     itemBuilder: (_) => <PopupMenuEntry<String>>[
                       const PopupMenuItem<String>(
-                        value: 'share',
-                        child: Text('分享此课表'),
+                        value: 'ics',
+                        child: Text('导出到日历（.ics）'),
                       ),
                       const PopupMenuItem<String>(
                         value: 'rename',
@@ -101,19 +97,15 @@ class TimetableManagePage extends StatelessWidget {
     );
   }
 
-  Future<void> _share(BuildContext context, Timetable tt) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await TimetableShare.share(tt);
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('分享失败：$e')));
-    }
-  }
-
   Future<void> _create(BuildContext context, AppState appState) async {
     final name = await _promptText(context, '新建课表', '我的课表');
-    if (name == null || name.trim().isEmpty) return;
-    await appState.createTimetable(name: name.trim());
+    if (name == null || name.trim().isEmpty || !context.mounted) return;
+    await createTimetableWithWeekPrompt(
+      context,
+      appState,
+      name: name.trim(),
+      today: (clock ?? DateTime.now)(),
+    );
   }
 
   Future<void> _rename(
@@ -136,7 +128,7 @@ class TimetableManagePage extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('删除课表'),
-        content: Text('确定删除「${tt.name}」及其 ${tt.courses.length} 门课吗？不可撤销。'),
+        content: Text('确定删除「${tt.name}」及其 ${tt.courseCountText}吗？不可撤销。'),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -176,36 +168,4 @@ class TimetableManagePage extends StatelessWidget {
       ),
     );
   }
-}
-
-/// 「从文件导入课表」：选 JSON → 校验 → 新建（不会覆盖现有课表）。
-///
-/// 课表管理页右上角和设置页「备份」分组都走这里。
-Future<void> importTimetableFromFile(
-  BuildContext context,
-  AppState appState,
-) async {
-  final messenger = ScaffoldMessenger.of(context);
-  TimetableImportOutcome? outcome;
-  try {
-    outcome = await TimetableShare.pickAndImport(appState);
-  } on FormatException catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('这不是有效的课表文件：${e.message}')));
-    return;
-  } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('读取失败：$e')));
-    return;
-  }
-  if (outcome == null) return;
-  final names = outcome.created.map((t) => '「${t.name}」').join('、');
-  final courses = outcome.created.fold<int>(
-    0,
-    (sum, t) => sum + t.courses.length,
-  );
-  final warn = outcome.warnings.isEmpty
-      ? ''
-      : '（${outcome.warnings.length} 条提醒：${outcome.warnings.first}）';
-  messenger.showSnackBar(
-    SnackBar(content: Text('已导入$names，共 $courses 门课，已切换过去$warn')),
-  );
 }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- release 包开了 shrinkResources：只被 Dart 端按名字引用的通知小图标会被当成「没用到」删掉，
+     通知就会静默失败（flutter_local_notifications README「Release build configuration」）。 -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_notify" />

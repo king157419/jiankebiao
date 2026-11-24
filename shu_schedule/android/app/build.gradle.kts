@@ -25,6 +25,10 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // v1.4.0：flutter_local_notifications 依赖 java.time 等 Java 8+ API 做定时通知，
+        // 插件 README 要求宿主开启 core library desugaring（即使不用定时也要开）。
+        // minSdk 24 原生支持多 dex，不需要 multiDexEnabled。
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -70,4 +74,12 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // 版本与 flutter_local_notifications 22.3.1 README / 插件自身 build.gradle 一致。
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // v1.4.0 C：小组件「显示哪一天 / 头部状态 / 下一节 / 重绘时刻」这些纯逻辑的 JVM 单测
+    // （src/test/kotlin，不需要模拟器）：`gradlew :app:testDebugUnitTest`。
+    testImplementation("junit:junit:4.13.2")
 }

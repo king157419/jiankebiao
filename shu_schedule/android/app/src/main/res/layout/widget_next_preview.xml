@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 只用于小组件选择器里「下一节」的预览（previewLayout，API 31+）：写死一节示例课。
+     真正的 widget_next 布局在 Provider 填数据之前是空白的，不能直接当预览。
+     API 30- 的启动器不认 previewLayout，走 next_widget_info 里的 previewImage。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/widget_bg_rounded"
+    android:backgroundTint="#FFFFFF"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
+    android:paddingLeft="12dp"
+    android:paddingRight="12dp">
+
+    <TextView
+        android:layout_width="4dp"
+        android:layout_height="match_parent"
+        android:layout_marginRight="8dp"
+        android:text=""
+        android:background="#B8D8F2" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#342632"
+            android:text="数据结构" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="12sp"
+            android:textColor="#933E6A"
+            android:text="上课中 · 至 14:40" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="11sp"
+            android:textColor="#68505F"
+            android:text="计算机楼 A-301" />
+    </LinearLayout>
+</LinearLayout>

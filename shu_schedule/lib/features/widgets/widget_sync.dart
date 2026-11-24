@@ -16,9 +16,13 @@ export 'widget_palette.dart' show WidgetPalette;
 /// 把课表数据推送给 Android 桌面小组件。
 ///
 /// 只有一份数据：`snapshot`（JSON 字符串）—— 从今天起覆盖整个学期的逐日课程
-/// （调休 / 停课已展开）+ 调色板 + 作息。
-/// 唯一的那个原生小组件（`DayWidgetProvider`）直接读它渲染，
-/// **不需要 Flutter 引擎在跑**（所以翻页、跨天都不用拉起 App）。
+/// （调休 / 停课已展开，每节课带 `start` / `end` 时刻）+ 调色板 + 作息。
+/// 两个原生小组件都直接读它渲染，**不需要 Flutter 引擎在跑**（翻页、跨天、
+/// 「上课中 / N 分钟后上课」、今天上完自动看明天都在 Kotlin 侧按当前时间算）：
+/// - `DayWidgetProvider`：4×2，某一天的课程列表；
+/// - `NextWidgetProvider`：v1.4.0 的 2×1「下一节」。
+///
+/// v1.5.0 起两种都能在「设置 → 添加桌面小组件」的面板里一键添加（`add_widget_helper.dart`）。
 ///
 /// v1.2.0 删掉了「本周课表」小组件，连带删掉了离屏渲染 PNG（`week_image`）那一步。
 class WidgetSync {
@@ -27,18 +31,30 @@ class WidgetSync {
   /// 快照在 home_widget SharedPreferences 里的 key。
   static const String snapshotKey = 'snapshot';
 
-  /// 唯一那个小组件 Provider 的类名（相对包名）。
+  /// 4×2 小组件 Provider 的类名（相对包名）。
   static const String dayProviderName = 'DayWidgetProvider';
 
-  /// Kotlin 里 Provider 的完整类名（包名 + `.widgets.`）。
+  /// Kotlin 里 4×2 Provider 的完整类名（包名 + `.widgets.`）。
   static const String dayProviderQualified =
       'cn.shu.schedule.widgets.DayWidgetProvider';
+
+  /// v1.4.0 2×1「下一节」Provider 的类名（相对包名）。
+  static const String nextProviderName = 'NextWidgetProvider';
+
+  /// Kotlin 里 2×1 Provider 的完整类名。
+  static const String nextProviderQualified =
+      'cn.shu.schedule.widgets.NextWidgetProvider';
 
   /// 推送后要通知刷新的所有 Provider。
   ///
   /// 少写一个的后果是那个小组件一直显示旧数据（系统 30 分钟周期才会兜底），
-  /// 所以新增 Provider 时务必同步加到这里。
-  static const List<String> refreshTargets = <String>[dayProviderQualified];
+  /// 所以新增 Provider 时务必同步加到这里（widget_android_config_test 会核对
+  /// 每一项在 AndroidManifest.xml 里都有 receiver）。没放到桌面上的 Provider
+  /// 收到刷新只是查不到实例、直接返回，不会报错。
+  static const List<String> refreshTargets = <String>[
+    dayProviderQualified,
+    nextProviderQualified,
+  ];
 
   /// 快照最多覆盖多少天（今天起）。
   ///
@@ -83,7 +99,7 @@ class WidgetSync {
       // 必须用 ScheduleUtils.addDays：本机时区有夏令时，
       // `add(Duration(days:))` 会得到 23:00 这种错位日期（NOTES.md §2.1）。
       final date = ScheduleUtils.addDays(today, offset);
-      // 调休 / 停课在这里展开，和今日页、周视图走同一个入口。
+      // 调休 / 停课在这里展开，和周视图、上课提醒走同一个入口。
       final effective = ScheduleUtils.effectiveDayOf(date, config);
       final rawWeek = effective.calendarWeek;
       final inTerm = rawWeek >= 1 && rawWeek <= config.totalWeeks;

@@ -253,16 +253,5 @@ void main() {
       expect(idsOn(DateTime(2026, 9, 12), tt), <String>['mon', 'mon-odd']);
       expect(idsOn(DateTime(2026, 9, 11), tt), isEmpty);
     });
-
-    test('nextCourse 跳过停课日', () {
-      final tt = build(
-        overrides: <String, DateOverride>{
-          '2026-10-01': const DateOverride.cancelled(),
-        },
-      );
-      // 10-01（周四）早上 7 点：原本下一节是当天的「周四的课」。
-      final next = ScheduleUtils.nextCourse(DateTime(2026, 10, 1, 7), tt);
-      expect(next!.id, 'sat', reason: '停课日跳过，下一节是 10-03 周六的课');
-    });
   });
 }

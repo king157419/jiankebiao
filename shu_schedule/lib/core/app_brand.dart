@@ -19,4 +19,4 @@ class AppBrand {
 /// 应用版本号（显示用）。发版时和 `pubspec.yaml` 的 version 同步
 /// （v1.3.0 起从 about_page.dart 挪到这里，about_page 仍然 re-export 它）。
 /// 检查更新比较的是 package_info_plus 读到的 versionCode，不是这个字符串。
-const String appVersion = '1.3.0';
+const String appVersion = '1.5.0';

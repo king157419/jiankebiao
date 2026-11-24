@@ -105,6 +105,10 @@ data class WidgetDay(
     val weekday: Int,
     val week: Int?,
     val courses: List<WidgetCourse>,
+    /** 「停课」/「调休」；普通日子为 null（快照 v2 起才有）。 */
+    val label: String? = null,
+    /** 调休 / 停课的备注（没有备注时是 App 写的完整说明）。 */
+    val note: String? = null,
 )
 
 /** Flutter 端 `WidgetSync.push` 写进 SharedPreferences 的整份快照。 */
@@ -171,6 +175,8 @@ data class WidgetSnapshot(
                   weekday = dayJson.optInt("weekday", 1),
                   week = if (dayJson.isNull("week")) null else dayJson.optInt("week"),
                   courses = courses,
+                  label = dayJson.optStringOrNull("label"),
+                  note = dayJson.optStringOrNull("note"),
               )
           )
         }
@@ -183,3 +189,7 @@ data class WidgetSnapshot(
     }
   }
 }
+
+/** 字段不存在 / 是 null / 空白时返回 null（`optString` 对 null 会返回字符串 "null"）。 */
+private fun JSONObject.optStringOrNull(name: String): String? =
+    if (!has(name) || isNull(name)) null else optString(name, "").trim().ifEmpty { null }

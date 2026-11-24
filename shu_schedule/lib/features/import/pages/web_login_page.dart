@@ -8,6 +8,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../core/app_state.dart';
 import '../../../core/feedback_links.dart';
+import '../../../core/holiday_presets.dart';
+import '../../../core/holiday_repository.dart';
 import '../adapters/school_adapter.dart';
 import '../adapters/school_registry.dart';
 import '../diagnostics/diagnostic_sample.dart';
@@ -327,12 +329,17 @@ class _WebLoginPageState extends State<WebLoginPage> {
       return;
     }
 
+    // 预览页按学校校历推开学日期（PLAN-1.5 D8）：先把当前的假日表读好传进去，
+    // 预览页里不做 IO。读不到就当空表（只剩教务识别 / 问用户两条路）。
+    final holidays = await _loadHolidayPresets();
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ImportPreviewPage(
           result: result,
           schoolName: widget.adapter.name,
           adapter: widget.adapter,
+          holidayPresets: holidays,
           diagnostics: _diagnosticInput(
             secrets: <String>[
               if (result.studentName != null) result.studentName!,
@@ -342,6 +349,15 @@ class _WebLoginPageState extends State<WebLoginPage> {
         ),
       ),
     );
+  }
+
+  /// 当前用的假日表（内置，或联网更新过的较新缓存）；出错时为空表。
+  static Future<HolidayPresets> _loadHolidayPresets() async {
+    try {
+      return await HolidayRepository().load();
+    } catch (_) {
+      return HolidayPresets.empty;
+    }
   }
 
   /// 预览页写入成功、退回首页之前调用：按策略清理登录态。
@@ -404,7 +420,8 @@ class _WebLoginPageState extends State<WebLoginPage> {
     try {
       await DiagnosticSample.exportAndShare(input);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('导出诊断样本失败：$e')));
+      debugPrint('导出导入记录失败：$e');
+      messenger.showSnackBar(const SnackBar(content: Text('导出导入记录失败，请稍后再试')));
     }
   }
 
@@ -463,7 +480,7 @@ class _WebLoginPageState extends State<WebLoginPage> {
                 Navigator.of(ctx).pop();
                 _exportDiagnostics();
               },
-              child: const Text('导出诊断样本'),
+              child: const Text('导出导入记录'),
             ),
           TextButton(
             onPressed: () {
@@ -512,7 +529,7 @@ class _WebLoginPageState extends State<WebLoginPage> {
               if (v == 'diag') _exportDiagnostics();
             },
             itemBuilder: (_) => const <PopupMenuEntry<String>>[
-              PopupMenuItem<String>(value: 'diag', child: Text('导出诊断样本')),
+              PopupMenuItem<String>(value: 'diag', child: Text('导出导入记录')),
             ],
           ),
           IconButton(

@@ -10,7 +10,7 @@ import '../../core/update/update_dialog.dart'
 ///
 /// - 反馈渠道已配置（[FeedbackLinks.isConfigured]）：「去 GitHub 反馈」用系统浏览器打开 Issues；
 /// - 没配置：显示提示，不给可点的链接；
-/// - 两种情况都有「复制诊断信息」（App 版本、Android 版本、机型），配置了邮箱时还有「复制邮箱」。
+/// - 两种情况都有「复制诊断信息」（App 版本、系统版本、机型），配置了邮箱时还有「复制邮箱」。
 Future<void> showFeedbackDialog(
   BuildContext context, {
   Future<String> Function()? diagnostics,
@@ -32,9 +32,8 @@ Future<void> showFeedbackDialog(
         children: <Widget>[
           Text(
             isConfigured
-                ? '遇到问题或有建议，欢迎到 GitHub Issues 里留言。附上诊断信息（App 版本、Android 版本、机型）能更快定位。'
-                : '反馈渠道还没有配置好（这是开发中的版本）。你可以先点「复制诊断信息」，'
-                      '连同问题描述和截图发给把 App 发给你的人。',
+                ? '遇到问题或有建议，欢迎到 GitHub 里留言。附上诊断信息（App 版本、系统版本、机型）能更快定位。'
+                : '把问题和截图发给把简课表发给你的人就行；可以先点「复制诊断信息」一起发。',
           ),
           if (mail.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
@@ -42,7 +41,7 @@ Future<void> showFeedbackDialog(
           ],
           const SizedBox(height: 8),
           Text(
-            '诊断信息不含课表、学号或姓名；导入失败时可以在导入页导出「诊断样本」。',
+            '诊断信息不含课表、学号或姓名；导入失败时可以在导入页导出「导入记录」。',
             style: TextStyle(
               fontSize: 12,
               color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,

@@ -34,9 +34,10 @@ class TermPreset {
   });
 }
 
-/// 内置的示例学期预设（新建课表时的默认学期）。
+/// 内置的示例学期预设（只保留给测试、示例课表和 `ScheduleConfig.defaults()` 兜底用）。
 ///
 /// 数据取自一所已验证学校的 2026-2027 学年校历：两学期制，每学期 18 周 = 16 教学周 + 2 考试周。
+/// v1.5.0 起不再出现在界面上，也不再作为真实新建课表的默认学期。
 final List<TermPreset> exampleTermPresets = <TermPreset>[
   TermPreset(
     id: 'shu-2026-autumn',

@@ -165,16 +165,22 @@ void main() {
       ]);
     });
 
-    test('脏数据被跳过并写进 warnings', () {
+    test('脏数据被跳过并写进白话 warnings（不含教务字段名）', () {
       expect(result.courses.any((c) => c.name == '星期越界课'), isFalse);
       expect(result.courses.any((c) => c.name == '周次为空课'), isFalse);
       expect(result.courses.any((c) => c.name == '节次为空课'), isFalse);
-      // 缺 kcmc / xqj=9 / zcd 空 / 节次空，共 4 条。
-      expect(result.warnings.length, 4);
-      expect(result.warnings.any((w) => w.contains('没有课程名')), isTrue);
-      expect(result.warnings.any((w) => w.contains('星期字段异常')), isTrue);
-      expect(result.warnings.any((w) => w.contains('周次文本无法解析')), isTrue);
-      expect(result.warnings.any((w) => w.contains('节次字段无法解析')), isTrue);
+      // 缺 kcmc 1 条 + 时间看不懂（xqj=9 / zcd 空 / 节次空）3 节，合并成 2 条白话提示。
+      expect(result.warnings, <String>[
+        '有 1 条记录缺少课程名，已跳过。',
+        '有 3 节课的时间看不懂，已跳过，可以手动补上。',
+      ]);
+      for (final field in <String>['kcmc', 'xqj', 'jcs', 'zcd']) {
+        expect(
+          result.warnings.join('\n'),
+          isNot(contains(field)),
+          reason: '给用户看的 warning 不应含字段名 $field',
+        );
+      }
     });
 
     test('sjkList → unscheduled，不进网格', () {
@@ -230,13 +236,20 @@ void main() {
       expect(result.detectedStartDate, DateTime(2026, 9, 14));
     });
 
-    test('拿不到周次 → 不再猜任何学校的校历，开学日期留空并给出 warning', () {
+    test('拿不到周次 → 开学日期留空，不加 warning（预览页按校历给默认值或问用户）', () {
       final result = adapter.parse(_withoutCurrentWeek(), now: now);
       expect(result.detectedCurrentWeek, isNull);
       expect(result.detectedStartDate, isNull);
       expect(
-        result.warnings.any((w) => w.contains('请在下一步选择本学期第一周的周一')),
-        isTrue,
+        result.warnings.where(
+          (w) => w.contains('第一周的周一') || w.contains('第 N 周'),
+        ),
+        isEmpty,
+      );
+      expect(
+        result.warnings.length,
+        adapter.parse(_withCurrentWeek(3), now: now).warnings.length,
+        reason: '有没有周次，提醒条数一样',
       );
     });
 
@@ -313,7 +326,7 @@ void main() {
       final result = adapter.parse(jsonEncode(kb), now: now);
       expect(result.courses.length, 8);
       expect(result.termName, '2026-2027 秋');
-      // 没有 currentWeek → 回退预设。
+      // 没有 currentWeek → 预览页按学校校历 / 问用户。
       expect(result.detectedCurrentWeek, isNull);
     });
   });
@@ -409,20 +422,26 @@ void main() {
       );
     });
 
-    test('脚本回传 __NOTJSON__ → 接口变化提示', () {
-      expect(
+    test('脚本回传 __NOTJSON__ → 白话提示「看不懂，可能还没登录成功」，不提 JSON', () {
+      final e = _catchImport(
         () => adapter.parse(
           '{"ok":false,"stage":"kb","error":"__NOTJSON__"}',
           now: now,
         ),
-        throwsA(
-          isA<ImportException>().having(
-            (e) => e.message,
-            'message',
-            contains('不是 JSON'),
-          ),
-        ),
       );
+      expect(e.message, '教务系统返回的内容看不懂，可能还没登录成功。');
+      expect(e.message, isNot(contains('JSON')));
+      expect(e.suggestion, isNotNull);
+    });
+
+    test('返回的不是 JSON、也不像登录页（例如维护页）→ 同一句白话提示，不提 JSON', () {
+      final e = _catchImport(
+        () => adapter.parse('<html><body>系统维护中，请稍后再试</body></html>', now: now),
+      );
+      expect(e.message, '教务系统返回的内容看不懂，可能还没登录成功。');
+      expect(e.message, isNot(contains('JSON')));
+      expect(e.stage, ImportStage.schedule);
+      expect(e.suggestion, contains('请确认已登录教务系统'));
     });
 
     test('脚本回传任意错误 → 带上原始信息', () {
@@ -590,7 +609,8 @@ void main() {
       final course = result.courses.single;
       expect(course.startPeriod, 1);
       expect(course.endPeriod, 4, reason: '取跨度更大的 jc');
-      expect(result.warnings.any((w) => w.contains('节次字段不一致')), isTrue);
+      expect(result.warnings.any((w) => w.contains('上课节次信息不一致')), isTrue);
+      expect(result.warnings.join('\n'), isNot(contains('jcs=')));
     });
 
     test('两者一致时不产生 warning', () {
@@ -731,6 +751,19 @@ void main() {
       expect(script, contains('kbcx/xskbcx_cxXsgrkb.html?gnmkdm=N2151'));
       expect(script, contains('kbcx/xskbcx_cxXskbcxIndex.html?gnmkdm=N2151'));
       expect(script, contains('xtgl/index_cxAreaSix.html'));
+      // v1.5.0 追加的第三条：只认「当前 / 本周 第 N 周」（strict），排在最后。
+      expect(
+        script,
+        contains(
+          "BASE + '/xtgl/index_cxshjdAreaFive.html?localeKey=zh_CN&gnmkdm=index', strict: true",
+        ),
+      );
+      expect(
+        script.indexOf('index_cxAreaSix.html'),
+        lessThan(script.indexOf('index_cxshjdAreaFive.html')),
+      );
+      expect(script, contains('if (!m && !strict)'));
+      expect(script, contains('matchWeek(t, item.strict)'));
       expect(script, contains('kzlx=ck&xsdm='));
       expect(script, contains("credentials: 'include'"));
       expect(

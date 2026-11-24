@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.4.0「下一节」2×1 小组件：课程色条 + 课程名 / 时间 / 地点三行，没有列表。
+     颜色和文字都由 NextWidgetProvider 按主题 palette 运行时设置，
+     这里的 tools:text 只给 Android Studio 预览用（启动器的选择器预览见 widget_next_preview）。
+     只使用 RemoteViews 支持的 View：LinearLayout / TextView。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/next_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/widget_bg_rounded"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
+    android:paddingLeft="12dp"
+    android:paddingRight="12dp">
+
+    <!-- 课程色条。RemoteViews 不支持 <View>，所以用空 TextView 当色块。 -->
+    <TextView
+        android:id="@+id/next_bar"
+        android:layout_width="4dp"
+        android:layout_height="match_parent"
+        android:layout_marginRight="8dp"
+        android:text=""
+        android:background="#00000000" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/next_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            tools:text="数据结构" />
+
+        <TextView
+            android:id="@+id/next_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="12sp"
+            tools:text="上课中 · 至 14:40" />
+
+        <TextView
+            android:id="@+id/next_location"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="11sp"
+            tools:text="计算机楼 A-301" />
+    </LinearLayout>
+</LinearLayout>

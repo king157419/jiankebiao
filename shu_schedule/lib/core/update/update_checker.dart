@@ -24,12 +24,17 @@ class UpdateInfo {
   /// APK 的 SHA-256（小写十六进制），没写为 null。
   final String? sha256;
 
+  /// 远程假日表 `holidays.json` 的 SHA-256（`"holidays": {"sha256": "…"}`，v1.4.0），
+  /// 没写为 null。有它时 `HolidayRepository.refresh` 会校验下载内容。
+  final String? holidaysSha256;
+
   const UpdateInfo({
     required this.versionCode,
     required this.versionName,
     this.changelog = '',
     this.downloadUrls = const <String>[],
     this.sha256,
+    this.holidaysSha256,
   });
 
   /// 第一个可用的下载地址；一个都没有时为 null。
@@ -73,19 +78,22 @@ class UpdateInfo {
         urls.add(u.trim());
       }
     }
-    final rawSha = json['sha256'];
-    final sha =
-        rawSha is String && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(rawSha.trim())
-        ? rawSha.trim().toLowerCase()
-        : null;
+    final holidays = json['holidays'];
     return UpdateInfo(
       versionCode: code,
       versionName: name.trim(),
       changelog: changelog,
       downloadUrls: urls,
-      sha256: sha,
+      sha256: parseSha256(json['sha256']),
+      holidaysSha256: holidays is Map ? parseSha256(holidays['sha256']) : null,
     );
   }
+
+  /// 64 位十六进制 → 小写；其他一律 null。
+  static String? parseSha256(Object? raw) =>
+      raw is String && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(raw.trim())
+      ? raw.trim().toLowerCase()
+      : null;
 }
 
 /// 一次检查的结论。
@@ -142,18 +150,25 @@ class UpdateChecker {
   /// 本机的 versionCode（Android versionCode = pubspec `+` 后面的数）。
   final Future<int> Function() currentVersionCode;
 
+  /// 没注入 [sources]，用的是 `kRepo` 派生的默认源。
+  final bool _defaultSources;
+
   UpdateChecker({
     List<String>? sources,
     Duration? timeout,
     UpdateFetch? fetch,
     Future<int> Function()? currentVersionCode,
   }) : sources = sources ?? UpdateConfig.sources,
+       _defaultSources = sources == null,
        timeout = timeout ?? UpdateConfig.perSourceTimeout,
        fetch = fetch ?? httpFetch,
        currentVersionCode = currentVersionCode ?? platformVersionCode;
 
-  /// 更新源是否已配置（没有 `OWNER/REPO` 占位符）。
-  bool get isConfigured => UpdateConfig.sourcesConfigured(sources);
+  /// 更新源是否已配置：默认源看 `kRepo` 是不是占位符，
+  /// 注入的源看有没有占位符（[UpdateConfig.placeholder]）。
+  bool get isConfigured => _defaultSources
+      ? UpdateConfig.isConfigured
+      : UpdateConfig.sourcesConfigured(sources);
 
   Future<UpdateCheckResult> check() async {
     if (!isConfigured) {
@@ -198,15 +213,14 @@ class UpdateChecker {
   static bool isNewer(int remote, int current) =>
       current > 0 && remote > current;
 
-  /// 自动检查的节流：已同意隐私说明、更新源已配置、今天（本地日历日）还没查过。
+  /// 自动检查的节流：更新源已配置、今天（本地日历日）还没查过。
   /// 上次检查时间在「未来」（改过系统时间）也允许再查。
   static bool shouldAutoCheck({
-    required bool privacyAccepted,
     required bool configured,
     required DateTime? lastCheck,
     required DateTime now,
   }) {
-    if (!privacyAccepted || !configured) return false;
+    if (!configured) return false;
     if (lastCheck == null) return true;
     if (lastCheck.isAfter(now)) return true;
     return lastCheck.year != now.year ||
@@ -225,10 +239,17 @@ class UpdateChecker {
   }
 
   /// 默认网络实现：`dart:io` 的 [HttpClient]，只允许 https，
-  /// 连接 + 读完都在 [timeout] 内，非 200 / 超过 [UpdateConfig.maxResponseBytes] 抛异常。
-  static Future<String> httpFetch(Uri uri, Duration timeout) async {
+  /// 连接 + 读完都在 [timeout] 内，非 200 / 超过 [maxBytes] 字节抛异常。
+  ///
+  /// [maxBytes] 默认是 `latest.json` 的上限（[UpdateConfig.maxResponseBytes]，64 KiB）；
+  /// 远程假日表用更大的上限（`HolidayRepository.defaultMaxBytes`，256 KiB）。
+  static Future<String> httpFetch(
+    Uri uri,
+    Duration timeout, {
+    int maxBytes = UpdateConfig.maxResponseBytes,
+  }) async {
     if (uri.scheme != 'https') {
-      throw const HttpException('只允许 https 更新源');
+      throw const HttpException('只允许 https 地址');
     }
     final client = HttpClient()
       ..connectionTimeout = timeout
@@ -242,8 +263,8 @@ class UpdateChecker {
       final bytes = <int>[];
       await for (final chunk in response.timeout(timeout)) {
         bytes.addAll(chunk);
-        if (bytes.length > UpdateConfig.maxResponseBytes) {
-          throw const HttpException('latest.json 太大');
+        if (bytes.length > maxBytes) {
+          throw HttpException('响应超过 ${maxBytes ~/ 1024} KiB', uri: uri);
         }
       }
       return utf8.decode(bytes, allowMalformed: true);

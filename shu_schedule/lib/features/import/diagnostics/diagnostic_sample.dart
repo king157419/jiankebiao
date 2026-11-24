@@ -67,7 +67,7 @@ class DiagnosticSample {
     String section(String? s) => truncateUtf8(clean(s), maxSectionBytes);
 
     final b = StringBuffer()
-      ..writeln('# 课表导入诊断样本')
+      ..writeln('# 课表导入记录')
       ..writeln('# 已在本机脱敏：8~12 位数字、11 位手机号、姓名字段替换为 $redactedMark。')
       ..writeln('# 每段原始数据最多保留前 ${maxSectionBytes ~/ 1024}KB。发送前可以先打开检查。')
       ..writeln('app: $version')
@@ -109,8 +109,8 @@ class DiagnosticSample {
     await SharePlus.instance.share(
       ShareParams(
         files: <XFile>[XFile(file.path, mimeType: 'text/plain')],
-        subject: '课表导入诊断样本',
-        text: '课表导入诊断样本（已在本机脱敏，发送前可以先打开检查）',
+        subject: '课表导入记录',
+        text: '课表导入记录（已在本机脱敏，发送前可以先打开检查）',
       ),
     );
     return file.path;

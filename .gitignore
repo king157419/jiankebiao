@@ -23,3 +23,13 @@ design/.omc/
 *.log
 design/.omx/
 design/.omc/
+
+# 发布包（体积大，按需从发布页下载）
+*.apk
+*.aab
+# 本机环境
+.env
+.env.*
+!.env.example
+node_modules/
+.venv/

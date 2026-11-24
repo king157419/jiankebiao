@@ -9,7 +9,7 @@ typedef PeriodSpanTime = ({String start, String end});
 
 /// 某个日历日「实际按哪一周、星期几上课」——调休 / 停课展开后的结果。
 ///
-/// 今日页、周视图、小组件快照都从 [ScheduleUtils.effectiveDayOf] 拿这个，
+/// 周视图、小组件快照、上课提醒都从 [ScheduleUtils.effectiveDayOf] 拿这个，
 /// 保证三处对同一天的理解一致。
 class EffectiveDay {
   /// 日历日（时分秒已清零）。
@@ -42,8 +42,17 @@ class EffectiveDay {
   /// 这一天是否被调休 / 停课改动过（只写了备注的不算）。
   bool get isOverridden => override?.changesSchedule ?? false;
 
-  /// 「停课」/「调休」/ null，给日期头、今日页、小组件用。
+  /// 「停课」/「调休」/ null，给小组件快照用（Kotlin 侧比对「停课」字面量）。
   String? get label => override?.shortLabel;
+
+  /// 周视图列头的单字角标（v1.4.0）：停课 →「休」，按别的星期 / 周次上课 →「补」；
+  /// 没有改动课程（没有设置 / 只写了备注）→ null。和 [label] 分开，
+  /// 免得改动小组件快照和 Kotlin 依赖的「停课」/「调休」。
+  String? get badge {
+    final o = override;
+    if (o == null || !o.changesSchedule) return null;
+    return cancelled ? '休' : '补';
+  }
 
   /// 完整说明：「停课」/「调休，按第 5 周周一上课」/「调休，按周一上课」；
   /// 没有调休时为 null。
@@ -244,12 +253,6 @@ class ScheduleUtils {
   static DateTime mondayOf(DateTime date) =>
       addDays(date, -(date.weekday - DateTime.monday));
 
-  /// 离 [date] 最近的周一：周一到周四取本周一，周五到周日取下周一。
-  static DateTime nearestMonday(DateTime date) {
-    final back = date.weekday - DateTime.monday; // 0..6
-    return back <= 3 ? addDays(date, -back) : addDays(date, 7 - back);
-  }
-
   // ------------------------------------------------------------------ 节次
 
   /// 取 [start]..[end] 节的起止时刻。越界会被裁剪到已有节次；
@@ -358,8 +361,8 @@ class ScheduleUtils {
 
   /// 某一天的课程（按起始节次升序），调休 / 停课已生效。
   ///
-  /// 这是「某天有什么课」的唯一入口：今日页、周视图、小组件快照、
-  /// [nextCourse] 都走这里（周视图拿 [effectiveDayOf] 自己再分本周 / 非本周）。
+  /// 这是「某天有什么课」的唯一入口：周视图、小组件快照、上课提醒都走这里
+  /// （周视图拿 [effectiveDayOf] 自己再分本周 / 非本周）。
   static List<Course> coursesOn(DateTime date, Timetable timetable) =>
       coursesOnEffective(effectiveDayOf(date, timetable.config), timetable);
 
@@ -385,36 +388,6 @@ class ScheduleUtils {
         return d != 0 ? d : a.startPeriod.compareTo(b.startPeriod);
       });
     return list;
-  }
-
-  /// 从 [now] 起最近的下一节课；未来 [lookaheadDays] 天内没有则返回 null。
-  static Course? nextCourse(
-    DateTime now,
-    Timetable timetable, {
-    int lookaheadDays = 14,
-  }) {
-    final nowMinutes = now.hour * 60 + now.minute;
-    for (var offset = 0; offset <= lookaheadDays; offset++) {
-      final date = addDays(now, offset);
-      for (final c in coursesOn(date, timetable)) {
-        if (offset == 0) {
-          final span = periodRange(
-            timetable.config,
-            c.startPeriod,
-            c.endPeriod,
-          );
-          if (_minutesOf(span.start) <= nowMinutes) continue;
-        }
-        return c;
-      }
-    }
-    return null;
-  }
-
-  static int _minutesOf(String hhmm) {
-    final parts = hhmm.split(':');
-    if (parts.length != 2) return 0;
-    return (int.tryParse(parts[0]) ?? 0) * 60 + (int.tryParse(parts[1]) ?? 0);
   }
 
   /// 检测同一课表内的时间冲突（同一天、同周、节次区间重叠）。

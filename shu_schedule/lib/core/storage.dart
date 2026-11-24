@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
@@ -32,6 +33,16 @@ class Storage {
 
   static const String timetablesFileName = 'timetables.json';
   static const String settingsFileName = 'settings.json';
+
+  /// 数据损坏 / 自动恢复时给用户看的白话提示（文件名与异常详情只打到 [debugPrint]）。
+  static const String recoveryWarningText = '读取课表时出了点问题，已经尽量恢复';
+
+  static void _addRecoveryWarning(List<String> warnings, String detail) {
+    debugPrint('[Storage] $detail');
+    if (!warnings.contains(recoveryWarningText)) {
+      warnings.add(recoveryWarningText);
+    }
+  }
 
   /// 测试可覆盖的根目录；为 null 时使用应用文档目录。
   static Directory? overrideDirectory;
@@ -79,6 +90,14 @@ class Storage {
     return getApplicationDocumentsDirectory();
   }
 
+  /// App 数据目录（`timetables.json` / `settings.json` 所在的目录）。
+  ///
+  /// 测试里设置了 [overrideDirectory] 就用它（不存在会先创建）；否则是
+  /// `getApplicationDocumentsDirectory()`。其他需要落盘的小缓存
+  /// （例如远程假日表 `holidays.remote.json`，v1.4.0）也放这里，
+  /// 这样「清除 App 数据 / 卸载」能一并删掉。
+  static Future<Directory> dataDirectory() => _baseDir();
+
   static Future<File> _file(String name) async =>
       File('${(await _baseDir()).path}${Platform.pathSeparator}$name');
 
@@ -109,7 +128,7 @@ class Storage {
       if (text.trim().isEmpty) return <Timetable>[];
       final decoded = jsonDecode(text);
       if (decoded is! List) {
-        warnings.add('timetables.json 顶层不是数组，已重置。');
+        _addRecoveryWarning(warnings, 'timetables.json 顶层不是数组，已重置。');
         await _quarantine(file);
         return <Timetable>[];
       }
@@ -118,13 +137,13 @@ class Storage {
         if (item is! Map) continue;
         try {
           result.add(Timetable.fromJson(Map<String, dynamic>.from(item)));
-        } catch (_) {
-          warnings.add('跳过了一条无法解析的课表数据。');
+        } catch (e) {
+          _addRecoveryWarning(warnings, '跳过了一条无法解析的课表数据：$e');
         }
       }
       return result;
     } catch (e) {
-      warnings.add('timetables.json 读取失败（$e），已回退到空课表列表。');
+      _addRecoveryWarning(warnings, 'timetables.json 读取失败（$e），已回退到空课表列表。');
       try {
         await _quarantine(await _file(timetablesFileName));
       } catch (_) {
@@ -143,13 +162,13 @@ class Storage {
       if (text.trim().isEmpty) return AppSettings.defaults();
       final decoded = jsonDecode(text);
       if (decoded is! Map) {
-        warnings.add('settings.json 顶层不是对象，已重置为默认设置。');
+        _addRecoveryWarning(warnings, 'settings.json 顶层不是对象，已重置为默认设置。');
         await _quarantine(file);
         return AppSettings.defaults();
       }
       return AppSettings.fromJson(Map<String, dynamic>.from(decoded));
     } catch (e) {
-      warnings.add('settings.json 读取失败（$e），已回退到默认设置。');
+      _addRecoveryWarning(warnings, 'settings.json 读取失败（$e），已回退到默认设置。');
       try {
         await _quarantine(await _file(settingsFileName));
       } catch (_) {
@@ -197,6 +216,24 @@ class Storage {
     await tmp.rename(file.path);
   }
 
+  /// [_writeAtomic] 的公开版本（v1.4.0，给 `HolidayRepository` 写缓存用）：
+  /// 写临时文件再 `rename` 覆盖；失败时尽量删掉临时文件，再把异常抛给调用方。
+  /// 不走 [_serialized] 写队列（那条队列只管课表 / 设置），调用方自己保证同一文件不并发写。
+  static Future<void> writeAtomic(File file, String content) async {
+    final tmp = File('${file.path}.${_tmpSeq++}.tmp');
+    try {
+      await tmp.writeAsString(content, flush: true);
+      await tmp.rename(file.path);
+    } catch (_) {
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {
+        // 清理失败不影响结果。
+      }
+      rethrow;
+    }
+  }
+
   /// 主文件不在、但留着 `<name>.<n>.tmp` 时，把最新的一个改名回来。
   ///
   /// 对应「写到一半被杀」的现场：`rename` 没来得及执行。
@@ -220,7 +257,7 @@ class Storage {
         (a, b) => a.statSync().modified.compareTo(b.statSync().modified),
       );
       await candidates.last.rename(file.path);
-      warnings.add('$base 上次写入被中断，已从临时文件恢复。');
+      _addRecoveryWarning(warnings, '$base 上次写入被中断，已从临时文件恢复。');
     } catch (_) {
       // 恢复失败就当没有这个文件，走默认值分支。
     }
@@ -272,7 +309,7 @@ class Storage {
       }
     }
     if (fixed > 0) {
-      warnings.add('修复了 $fixed 个重复或缺失的 id。');
+      _addRecoveryWarning(warnings, '修复了 $fixed 个重复或缺失的 id。');
     }
   }
 
@@ -345,7 +382,7 @@ class Storage {
   ) {
     final version = backupVersionOf(decoded);
     if (version > backupVersion) {
-      warnings.add('备份来自更新版本的 App（格式 v$version），部分新数据可能无法读取。');
+      _addRecoveryWarning(warnings, '备份来自更新版本的 App（格式 v$version），部分新数据可能无法读取。');
       return decoded;
     }
     var data = decoded;
@@ -372,13 +409,13 @@ class Storage {
     for (var i = 0; i < rawTimetables.length; i++) {
       final item = rawTimetables[i];
       if (item is! Map) {
-        warnings.add('备份里第 ${i + 1} 条课表不是对象，已跳过。');
+        _addRecoveryWarning(warnings, '备份里第 ${i + 1} 条课表不是对象，已跳过。');
         continue;
       }
       try {
         timetables.add(Timetable.fromJson(Map<String, dynamic>.from(item)));
       } catch (e) {
-        warnings.add('备份里第 ${i + 1} 条课表无法解析（$e），已跳过。');
+        _addRecoveryWarning(warnings, '备份里第 ${i + 1} 条课表无法解析（$e），已跳过。');
       }
     }
     if (timetables.isEmpty && rawTimetables.isNotEmpty) {

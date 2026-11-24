@@ -12,7 +12,7 @@ import es.antonborri.home_widget.HomeWidgetPlugin
 import java.util.Calendar
 
 /**
- * 给「上大课表」小组件里的 `ListView`（`R.id.day_list`）供数据的远程适配器服务。
+ * 给「简课表」4×2 小组件里的 `ListView`（`R.id.day_list`）供数据的远程适配器服务。
  *
  * RemoteViews 的 `ListView` 不能像普通列表那样直接塞 View：系统会跨进程
  * 绑定这个 Service，拿到一个 [RemoteViewsService.RemoteViewsFactory]，
@@ -36,7 +36,8 @@ class DayWidgetService : RemoteViewsService() {
  *
  * 数据来源和 [DayWidgetProvider] 完全一致：
  * - 课表快照：home_widget 写的那份 SharedPreferences（`HomeWidgetPlugin.getData`）；
- * - 翻页偏移：[PREFS_PAGE] 里按 appWidgetId 存的 offset（跨天自动回 0）。
+ * - 翻页偏移：[PREFS_PAGE] 里按 appWidgetId 存的 offset（跨天自动回 0）；
+ * - 显示哪一天：和 Provider 共用 [resolveDisplay]（含 v1.4.0 的「今天上完了自动看明天」）。
  *
  * 只在 [onDataSetChanged] 里读一次盘，之后 [getViewAt] 纯内存取值——
  * 这个回调跑在 binder 线程上，系统会等它返回才刷新列表，不能做慢活。
@@ -49,7 +50,10 @@ class DayRemoteViewsFactory(
   private var palette: WidgetPalette = WidgetPalette.FALLBACK
   private var courses: List<WidgetCourse> = emptyList()
 
-  /** 要高亮的行（当前 / 下一节）；-1 = 不高亮（显示的不是今天，或今天的课都上完了）。 */
+  /**
+   * 要高亮的行（当前 / 下一节）；-1 = 不高亮。
+   * 今天：第一节还没结束的课；自动看明天：明天第一节（它就是「下一节」）；其他日子不高亮。
+   */
   private var highlightIndex: Int = -1
 
   override fun onCreate() = Unit
@@ -69,22 +73,22 @@ class DayRemoteViewsFactory(
         try {
           readOffset(pageStore(context), widgetId, today)
         } catch (e: Exception) {
-          0
+          OFFSET_DEFAULT
         }
 
-    // 和 DayWidgetProvider 一样：先在快照里定位「今天」，再按偏移取那一天。
-    val todayIndex = snapshot?.days?.indexOfFirst { it.date == today } ?: -1
-    val day = if (todayIndex < 0) null else snapshot?.days?.getOrNull(todayIndex + offset)
+    // 和 DayWidgetProvider.render 同一个函数决定显示哪一天，两边不会错位。
+    val display = resolveDisplay(snapshot, calendar, offset)
+    val day = snapshot?.days?.getOrNull(display.dayIndex)
     courses = day?.courses ?: emptyList()
 
-    // 只有显示今天才高亮「当前 / 下一节」= 第一门还没结束的课。
+    // 「当前 / 下一节」：今天 = 第一门还没结束的课（结束时刻那一分钟起就不算了，和头部一致）；
+    // 自动看明天 = 明天第一节。
+    val nowMinutes = minutesOfDay(calendar)
     highlightIndex =
-        if (offset != 0) {
-          -1
-        } else {
-          val nowMinutes =
-              calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
-          courses.indexOfFirst { it.endMinutes >= nowMinutes }
+        when {
+          display.daysFromToday == 0 -> courses.indexOfFirst { it.endMinutes > nowMinutes }
+          display.autoTomorrow && courses.isNotEmpty() -> 0
+          else -> -1
         }
   }
 

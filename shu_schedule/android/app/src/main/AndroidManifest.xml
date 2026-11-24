@@ -1,6 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 教务系统登录 / 抓取课表需要联网。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- v1.4.0 上课提醒（flutter_local_notifications，见插件 README「AndroidManifest.xml setup」）：
+         - POST_NOTIFICATIONS：Android 13+ 发通知要用户授权（插件清单里也有，这里显式写出来）；
+         - 精确闹钟（v1.4.0 修复轮改为 USE_EXACT_ALARM，按官方 Manifest.permission#USE_EXACT_ALARM 的写法）：
+           课表提醒属于日历类用途、App 只侧载不上应用商店，而非精确闹钟在 Android 12+ 上可能晚到 1 小时。
+           Android 13+（API 33+）用 USE_EXACT_ALARM，安装即授予、用户不能收回；
+           Android 12 / 12L（API 31-32）用 SCHEDULE_EXACT_ALARM（maxSdkVersion=32），默认授予但可在系统里收回，
+           收回时 Dart 端退回非精确闹钟（inexactAllowWhileIdle），提醒设置页显示提示卡「提醒可能不准时 · 去系统设置允许「闹钟和提醒」」（ReminderProblem.exactAlarms）；
+         - RECEIVE_BOOT_COMPLETED：开机后由插件重新排好已安排的提醒（androidx.work 也会合并进来同一个）；
+         - VIBRATE：提醒振动。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
 
     <application
         android:label="@string/app_name"
@@ -33,24 +47,14 @@
             <intent-filter>
                 <action android:name="es.antonborri.home_widget.action.LAUNCH"/>
             </intent-filter>
-            <!-- 长按 App 图标的三个静态快捷方式（res/xml/shortcuts.xml 里是显式 Intent，
-                 严格说不需要 intent-filter；留着是为了让 action 本身也能被显式声明，
-                 顺带给以后可能出现的外部调用留个口子）。 -->
-            <intent-filter>
-                <action android:name="cn.shu.schedule.action.SHORTCUT_TODAY"/>
-                <action android:name="cn.shu.schedule.action.SHORTCUT_IMPORT"/>
-                <action android:name="cn.shu.schedule.action.SHORTCUT_ADD_WIDGET"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-            </intent-filter>
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/shortcuts"/>
         </activity>
 
         <!-- ============ 桌面小组件 ============ -->
-        <!-- v1.2.0 起只保留这一个：4x2「简课表」，◀ / ▶ 翻页 + 课程列表可滑动。
+        <!-- 4x2「简课表」：◀ / ▶ 翻页 + 课程列表可滑动。v1.5.0 起两种小组件都能在
+             App 里「设置 → 添加桌面小组件」的面板上一键添加（MainActivity.requestPinWidget）。
              偏移按 appWidgetId 存在 cn.shu.schedule.widget_page 这个 SharedPreferences 里。
-             翻页广播（cn.shu.schedule.action.WIDGET_PAGE）是显式 Intent 指向本 receiver，
+             翻页广播（cn.shu.schedule.action.WIDGET_PAGE）、跨天 / 边界重绘广播
+             （DAILY_REFRESH / BOUNDARY_REFRESH）都是显式 Intent 指向本 receiver，
              不需要 intent-filter。 -->
         <receiver
             android:name=".widgets.DayWidgetProvider"
@@ -64,12 +68,49 @@
                 android:resource="@xml/day_widget_info"/>
         </receiver>
 
-        <!-- 小组件里那个可滑动的 ListView 的数据源。
+        <!-- v1.4.0 2x1「下一节」：只显示一节课，没有列表和翻页；v1.5.0 起也能在 App 里一键添加。 -->
+        <receiver
+            android:name=".widgets.NextWidgetProvider"
+            android:label="@string/widget_next_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/next_widget_info"/>
+        </receiver>
+
+        <!-- 4x2 小组件里那个可滑动的 ListView 的数据源。
              BIND_REMOTEVIEWS 是系统权限：加上之后只有系统进程能绑定这个 Service。 -->
         <service
             android:name=".widgets.DayWidgetService"
             android:permission="android.permission.BIND_REMOTEVIEWS"
             android:exported="false"/>
+
+        <!-- v1.5.0：App 内「添加到桌面」成功后的回调（requestPinAppWidget 的 successCallback），
+             收到就弹 Toast「小组件已添加到桌面」。PendingIntent 以本 App 身份发出、是显式 Intent，
+             所以不导出、也不需要 intent-filter。 -->
+        <receiver
+            android:name=".PinResultReceiver"
+            android:exported="false"/>
+
+        <!-- ============ 上课提醒（flutter_local_notifications） ============ -->
+        <!-- 定时到点后由这个 receiver 发出通知。 -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
+        <!-- 开机 / App 更新后，插件把已安排的提醒重新交给 AlarmManager。 -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

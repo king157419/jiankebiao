@@ -7,14 +7,13 @@ import 'package:shu_schedule/core/app_state.dart';
 import 'package:shu_schedule/core/schedule_utils.dart';
 import 'package:shu_schedule/core/storage.dart';
 import 'package:shu_schedule/core/theme/theme_controller.dart';
-import 'package:shu_schedule/features/timetable/today_page.dart';
 import 'package:shu_schedule/features/timetable/week_view_page.dart';
 import 'package:shu_schedule/models/course.dart';
 import 'package:shu_schedule/models/period_time.dart';
 import 'package:shu_schedule/models/schedule_config.dart';
 import 'package:shu_schedule/models/timetable.dart';
 
-/// v1.3.0 Phase A：周视图 / 今日页里的调休、停课与自动休息带。
+/// v1.3.0 Phase A：周视图里的调休、停课与自动休息带（v1.5.0 删掉了今日页）。
 ///
 /// 和 week_view_test 一样：磁盘 / asset I/O 必须包在 `tester.runAsync` 里。
 void main() {
@@ -106,13 +105,27 @@ void main() {
     await pumpPage(tester, state, controller, const WeekViewPage());
     expect(tester.takeException(), isNull);
 
-    // 日期头标出了这两天。
+    // 日期头标出了这两天：v1.4.0 起是小角标「休」/「补」（key 不变）；
+    // 「停课」/「调休」两个词只留给小组件（EffectiveDay.label）。
+    final todayBadge = find.byKey(
+      ValueKey<String>('override-${ScheduleUtils.dateKey(today)}'),
+    );
+    final otherBadge = find.byKey(
+      ValueKey<String>('override-${ScheduleUtils.dateKey(otherDate)}'),
+    );
+    expect(todayBadge, findsOneWidget);
     expect(
-      find.byKey(ValueKey<String>('override-${ScheduleUtils.dateKey(today)}')),
+      find.descendant(of: todayBadge, matching: find.text('休')),
       findsOneWidget,
     );
-    expect(find.text('停课'), findsOneWidget);
-    expect(find.text('调休'), findsOneWidget);
+    expect(
+      find.descendant(of: otherBadge, matching: find.text('补')),
+      findsOneWidget,
+    );
+    expect(find.text('休'), findsOneWidget);
+    expect(find.text('补'), findsOneWidget);
+    expect(find.text('停课'), findsNothing);
+    expect(find.text('调休'), findsNothing);
     // 课程只画一次（在调休那天的列里），停课的今天不画。
     expect(find.text('今天这个星期的课'), findsOneWidget);
     final blockX = tester.getCenter(find.text('今天这个星期的课')).dx;
@@ -135,6 +148,8 @@ void main() {
       (state, controller) = await buildState();
     });
     await pumpPage(tester, state, controller, const WeekViewPage());
+    expect(find.text('休'), findsNothing);
+    expect(find.text('补'), findsNothing);
     expect(find.text('停课'), findsNothing);
     expect(find.text('调休'), findsNothing);
     expect(find.text('今天这个星期的课'), findsOneWidget);
@@ -179,44 +194,6 @@ void main() {
     expect(eveningY, greaterThan(tester.getCenter(find.text('17:40')).dy));
     expect(eveningY, lessThan(tester.getCenter(find.text('19:00')).dy));
 
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('今日页：停课日不列课程，副标题写明停课', (tester) async {
-    late AppState state;
-    late ThemeController controller;
-    await tester.runAsync(() async {
-      (state, controller) = await buildState(
-        overrides: <String, DateOverride>{
-          ScheduleUtils.dateKey(today): const DateOverride.cancelled(
-            note: '运动会',
-          ),
-        },
-      );
-    });
-    await pumpPage(tester, state, controller, const TodayPage());
-    expect(find.text('今天这个星期的课'), findsNothing);
-    expect(find.textContaining('第 1 周 · 停课（运动会）'), findsOneWidget);
-    expect(find.text('今天停课。'), findsOneWidget);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('今日页：调休日列出被换过来的那天的课', (tester) async {
-    late AppState state;
-    late ThemeController controller;
-    await tester.runAsync(() async {
-      // 今天按「本周另一天」的星期上课：原本今天的课不上。
-      (state, controller) = await buildState(
-        overrides: <String, DateOverride>{
-          ScheduleUtils.dateKey(today): DateOverride.actAs(
-            weekday: otherWeekday,
-          ),
-        },
-      );
-    });
-    await pumpPage(tester, state, controller, const TodayPage());
-    expect(find.text('今天这个星期的课'), findsNothing);
-    expect(find.textContaining('调休，按'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import '../../../core/presets.dart';
 import '../../../core/schedule_utils.dart';
 import '../../../models/course.dart';
@@ -152,7 +154,7 @@ class ZfsoftAdapter extends SchoolAdapter {
         throw const ImportException.notLoggedIn();
       }
       throw const ImportException(
-        '教务系统返回的内容不是 JSON，接口可能已经变化。',
+        '教务系统返回的内容看不懂，可能还没登录成功。',
         stage: ImportStage.schedule,
         suggestion: '请确认已登录教务系统；若反复失败，可能是学校改了接口，需要更新 App。',
       );
@@ -195,15 +197,14 @@ class ZfsoftAdapter extends SchoolAdapter {
         (currentWeek < 1 || currentWeek > ScheduleUtils.maxWeek)) {
       currentWeek = null;
     }
+    // 识别不到周次时不加 warning：预览页会按学校校历给默认值，或问「现在是第几周？」
+    // （v1.5.0，PLAN-1.5 D8）。
     DateTime? detectedStartDate;
     if (currentWeek != null) {
       detectedStartDate = ScheduleUtils.addDays(
         ScheduleUtils.mondayOf(at),
         -(currentWeek - 1) * 7,
       );
-    } else {
-      // 不再拿任何一所学校的校历去猜：让用户在预览页自己选第一周的周一。
-      warnings.add('未能从教务页面识别到「第 N 周」，请在下一步选择本学期第一周的周一。');
     }
 
     // 正方的课表接口不带节次时刻，detectedPeriods 留空，由预览页兜底。
@@ -250,7 +251,7 @@ class ZfsoftAdapter extends SchoolAdapter {
     }
     if (code == '__NOTJSON__') {
       return const ImportException(
-        '教务系统返回的内容不是 JSON，接口可能已经变化或被重定向。',
+        '教务系统返回的内容看不懂，可能还没登录成功。',
         stage: ImportStage.schedule,
         suggestion: '请回到教务首页确认能正常看到课表后重试。',
       );
@@ -282,26 +283,34 @@ class ZfsoftAdapter extends SchoolAdapter {
 
   List<Course> _parseKbList(Object? raw, List<String> warnings) {
     if (raw is! List) {
-      if (raw != null) warnings.add('kbList 字段不是数组，已忽略。');
+      if (raw != null) {
+        debugPrint('[ZfsoftAdapter] kbList 字段不是数组：${raw.runtimeType}');
+        warnings.add('课程列表格式异常，已忽略。');
+      }
       return <Course>[];
     }
     // key -> 合并后的课程；用 LinkedHashMap 保持首次出现顺序。
     final merged = <String, _MergedCourse>{};
+    var skippedNoName = 0;
+    var skippedBadTime = 0;
     for (var i = 0; i < raw.length; i++) {
       final item = raw[i];
       if (item is! Map) {
-        warnings.add('第 ${i + 1} 条课表记录格式异常，已跳过。');
+        debugPrint('[ZfsoftAdapter] 第 ${i + 1} 条课表记录不是对象');
+        skippedNoName++;
         continue;
       }
       final m = Map<String, dynamic>.from(item);
       final name = _str(m['kcmc']);
       if (name == null) {
-        warnings.add('第 ${i + 1} 条课表记录没有课程名（kcmc），已跳过。');
+        debugPrint('[ZfsoftAdapter] 第 ${i + 1} 条课表记录缺少 kcmc');
+        skippedNoName++;
         continue;
       }
       final day = _int(m['xqj']);
       if (day == null || day < 1 || day > 7) {
-        warnings.add('「$name」的星期字段异常（xqj=${m['xqj']}），已跳过。');
+        debugPrint('[ZfsoftAdapter] 「$name」星期异常：xqj=${m['xqj']}');
+        skippedBadTime++;
         continue;
       }
       final span = parsePeriodSpan(
@@ -311,12 +320,16 @@ class ZfsoftAdapter extends SchoolAdapter {
         courseName: name,
       );
       if (span == null) {
-        warnings.add('「$name」的节次字段无法解析（jcs=${m['jcs']}, jc=${m['jc']}），已跳过。');
+        debugPrint(
+          '[ZfsoftAdapter] 「$name」节次无法解析：jcs=${m['jcs']}, jc=${m['jc']}',
+        );
+        skippedBadTime++;
         continue;
       }
       final weeks = ScheduleUtils.parseWeeksText(_str(m['zcd']));
       if (weeks.isEmpty) {
-        warnings.add('「$name」的周次文本无法解析（zcd=${m['zcd']}），已跳过。');
+        debugPrint('[ZfsoftAdapter] 「$name」周次无法解析：zcd=${m['zcd']}');
+        skippedBadTime++;
         continue;
       }
       final teacher = _cleanTeacher(_str(m['xm']));
@@ -345,6 +358,12 @@ class ZfsoftAdapter extends SchoolAdapter {
           note: _noteOf(m),
         );
       }
+    }
+    if (skippedNoName > 0) {
+      warnings.add('有 $skippedNoName 条记录缺少课程名，已跳过。');
+    }
+    if (skippedBadTime > 0) {
+      warnings.add('有 $skippedBadTime 节课的时间看不懂，已跳过，可以手动补上。');
     }
 
     final result = <Course>[];
@@ -466,8 +485,11 @@ class ZfsoftAdapter extends SchoolAdapter {
     final chosen = (fromJc.$2 - fromJc.$1) > (fromJcs.$2 - fromJcs.$1)
         ? fromJc
         : fromJcs;
+    debugPrint(
+      '[ZfsoftAdapter] 「${courseName ?? '某门课'}」节次不一致：jcs=$jcs, jc=$jc',
+    );
     warnings?.add(
-      '「${courseName ?? '某门课'}」的节次字段不一致（jcs=$jcs, jc=$jc），'
+      '「${courseName ?? '某门课'}」的上课节次信息不一致，'
       '已按跨度更大的第 ${chosen.$1}-${chosen.$2} 节处理，请核对。',
     );
     return chosen;
@@ -703,12 +725,12 @@ const String _scrapeTemplate = r'''
   }
   /* 「当前第 N 周」优先，其次「本周…第 N 周」，最后才是宽松匹配。
      页面上常有「第1周-第18周」这种范围文本，直接宽松匹配会抓到 1，
-     开学日期整体偏移。 */
-  function matchWeek(t) {
+     开学日期整体偏移。strict = true 时不做宽松匹配。 */
+  function matchWeek(t, strict) {
     var s = String(t);
     var m = s.match(/\u5f53\u524d[^0-9]{0,6}\u7b2c\s*(\d+)\s*\u5468/);
     if (!m) m = s.match(/\u672c\s*\u5468[^0-9]{0,4}\u7b2c\s*(\d+)\s*\u5468/);
-    if (!m) m = s.match(/\u7b2c\s*(\d+)\s*\u5468/);
+    if (!m && !strict) m = s.match(/\u7b2c\s*(\d+)\s*\u5468/);
     return m ? parseInt(m[1], 10) : null;
   }
   function selectedOption(doc, id) {
@@ -756,17 +778,21 @@ const String _scrapeTemplate = r'''
     })
     .then(function () {
       progress('week');
+      /* 第三条（v1.5.0）：正方部分部署把「第 N 周」放在首页的这个区块里。
+         这个区块没人核对过，只认「当前 / 本周 第 N 周」的写法（strict），
+         免得把「第1周-第18周」当成第 1 周、顶掉更可靠的学校校历。 */
       var urls = [
-        BASE + '/xtgl/index_initMenu.html',
-        BASE + '/xtgl/index_cxAreaSix.html?localeKey=zh_CN&gnmkdm=index'
+        { u: BASE + '/xtgl/index_initMenu.html', strict: false },
+        { u: BASE + '/xtgl/index_cxAreaSix.html?localeKey=zh_CN&gnmkdm=index', strict: false },
+        { u: BASE + '/xtgl/index_cxshjdAreaFive.html?localeKey=zh_CN&gnmkdm=index', strict: true }
       ];
       var chain = Promise.resolve();
-      urls.forEach(function (u) {
+      urls.forEach(function (item) {
         chain = chain.then(function () {
           if (out.currentWeek) return null;
-          return getText(u).then(function (t) {
-            var w = matchWeek(t);
-            if (w) { out.currentWeek = w; out.weekSource = u; }
+          return getText(item.u).then(function (t) {
+            var w = matchWeek(t, item.strict);
+            if (w) { out.currentWeek = w; out.weekSource = item.u; }
           }).catch(function () { });
         });
       });

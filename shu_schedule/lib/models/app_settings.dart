@@ -1,3 +1,7 @@
+import 'reminder_settings.dart';
+
+export 'reminder_settings.dart';
+
 /// 全局应用设置。
 class AppSettings {
   /// 当前选中的课表 id，空串表示尚未选择。
@@ -17,14 +21,31 @@ class AppSettings {
   /// 旧存档没有这个字段 → false（不需要升 [settingsVersion]）。
   bool rememberEduLogin;
 
-  /// 用户同意过的隐私说明版本（`PrivacyPolicy.version`）。0 = 从没同意过：
-  /// 首次启动（以及从 1.2.0 覆盖安装上来）会弹一次「隐私说明」，同意之前 App
-  /// 不做任何联网请求。v1.3.0 新增，旧存档没有这个字段 → 0（不需要升 [settingsVersion]）。
-  int privacyAcceptedVersion;
-
   /// 上一次检查更新的时间（本地时间）；null = 从没查过。
   /// 用来保证「每天最多自动查一次」。v1.3.0 新增，旧存档 → null。
   DateTime? lastUpdateCheck;
+
+  /// 上一次联网刷新假日表的时间（本地时间）；null = 从没刷新过。
+  /// 用来保证「24 小时内最多自动刷新一次」（`HolidayRepository.refresh`）。
+  /// 和 [lastUpdateCheck] 一样是这台手机上的状态，恢复备份时保留设备上的值。
+  /// v1.4.0 新增，旧存档 → null（不需要升 [settingsVersion]）。
+  DateTime? lastHolidayRefresh;
+
+  /// 上课提醒偏好（总开关、提前分钟、明日预告）。用户偏好，**跟着备份恢复**
+  /// （不像 [lastUpdateCheck] 那样保留设备上的值）。v1.4.0 新增，
+  /// 旧存档 / 旧备份没有这个字段 → 出厂默认（关闭），不需要升 [settingsVersion]。
+  ReminderSettings reminders;
+
+  /// 校历建议面板点过「先不用」或「一键套用」的记录：课表 id →
+  /// `'<schoolId>|<term.startDate>|<entriesHash>'`（学期内容指纹 `termKey`）。
+  /// 同一所学校同一个学期的条目没变就不再在启动时弹；该学期条目更新了才会再提示。
+  /// 用户偏好，跟着备份恢复。v1.5.0 新增，旧存档没有这个字段 → 空表。
+  Map<String, String> calendarSuggestionDismissed;
+
+  /// 用户或教务系统已经确认过的开学日期：课表 id → 开学日期 `yyyy-MM-dd`（`dateKey`）。
+  /// 确认过这天的课表，启动或假期表更新时校历建议不再提议改开学日期（只提示放假 / 调休）。
+  /// 用户偏好，跟着备份恢复。v1.5.0 新增，旧存档没有这个字段 → 空表。
+  Map<String, String> termStartConfirmed;
 
   /// 设置结构的版本号，用来做一次性迁移。
   ///
@@ -42,10 +63,18 @@ class AppSettings {
     this.showNonCurrentWeekCourses = false,
     this.showTimeInGrid = false,
     this.rememberEduLogin = false,
-    this.privacyAcceptedVersion = 0,
     this.lastUpdateCheck,
+    this.lastHolidayRefresh,
+    this.reminders = const ReminderSettings(),
+    Map<String, String>? calendarSuggestionDismissed,
+    Map<String, String>? termStartConfirmed,
     this.settingsVersion = currentVersion,
-  });
+  }) : calendarSuggestionDismissed = calendarSuggestionDismissed == null
+           ? <String, String>{}
+           : Map<String, String>.of(calendarSuggestionDismissed),
+       termStartConfirmed = termStartConfirmed == null
+           ? <String, String>{}
+           : Map<String, String>.of(termStartConfirmed);
 
   /// 出厂默认设置。
   factory AppSettings.defaults() => AppSettings();
@@ -56,8 +85,11 @@ class AppSettings {
     bool? showNonCurrentWeekCourses,
     bool? showTimeInGrid,
     bool? rememberEduLogin,
-    int? privacyAcceptedVersion,
     DateTime? lastUpdateCheck,
+    DateTime? lastHolidayRefresh,
+    ReminderSettings? reminders,
+    Map<String, String>? calendarSuggestionDismissed,
+    Map<String, String>? termStartConfirmed,
     int? settingsVersion,
   }) => AppSettings(
     currentTimetableId: currentTimetableId ?? this.currentTimetableId,
@@ -66,9 +98,12 @@ class AppSettings {
         showNonCurrentWeekCourses ?? this.showNonCurrentWeekCourses,
     showTimeInGrid: showTimeInGrid ?? this.showTimeInGrid,
     rememberEduLogin: rememberEduLogin ?? this.rememberEduLogin,
-    privacyAcceptedVersion:
-        privacyAcceptedVersion ?? this.privacyAcceptedVersion,
     lastUpdateCheck: lastUpdateCheck ?? this.lastUpdateCheck,
+    lastHolidayRefresh: lastHolidayRefresh ?? this.lastHolidayRefresh,
+    reminders: reminders ?? this.reminders,
+    calendarSuggestionDismissed:
+        calendarSuggestionDismissed ?? this.calendarSuggestionDismissed,
+    termStartConfirmed: termStartConfirmed ?? this.termStartConfirmed,
     settingsVersion: settingsVersion ?? this.settingsVersion,
   );
 
@@ -78,8 +113,13 @@ class AppSettings {
     'showNonCurrentWeekCourses': showNonCurrentWeekCourses,
     'showTimeInGrid': showTimeInGrid,
     'rememberEduLogin': rememberEduLogin,
-    'privacyAcceptedVersion': privacyAcceptedVersion,
     'lastUpdateCheck': lastUpdateCheck?.toIso8601String(),
+    'lastHolidayRefresh': lastHolidayRefresh?.toIso8601String(),
+    'reminders': reminders.toJson(),
+    'calendarSuggestionDismissed': Map<String, String>.of(
+      calendarSuggestionDismissed,
+    ),
+    'termStartConfirmed': Map<String, String>.of(termStartConfirmed),
     'settingsVersion': settingsVersion,
   };
 
@@ -95,6 +135,10 @@ class AppSettings {
   ///
   /// settings.json 和备份文件里的 `settings` 都走这里，所以备份 v1 → v2
   /// 迁移（`Storage.migrateBackupV1ToV2`）不需要自己处理设置字段。
+  ///
+  /// 只按键取值，不认识的键直接忽略：v1.3.0–v1.4.0 存档里的
+  /// `privacyAcceptedVersion`（v1.5.0 删掉了首启隐私同意）读进来什么都不做，
+  /// 下次写盘时自然消失。
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final version = versionOf(json);
     var showTimeInGrid = json['showTimeInGrid'] is bool
@@ -102,8 +146,8 @@ class AppSettings {
         : false;
     // v1 → v2：不管 v1 里写的是什么，都按新默认值（false）走一次，只迁移这一次。
     if (version < 2) showTimeInGrid = false;
-    final privacy = json['privacyAcceptedVersion'];
     final lastCheck = json['lastUpdateCheck'];
+    final lastHoliday = json['lastHolidayRefresh'];
     return AppSettings(
       currentTimetableId: json['currentTimetableId'] is String
           ? json['currentTimetableId'] as String
@@ -119,14 +163,29 @@ class AppSettings {
       rememberEduLogin: json['rememberEduLogin'] is bool
           ? json['rememberEduLogin'] as bool
           : false,
-      privacyAcceptedVersion: privacy is num && privacy > 0
-          ? privacy.toInt()
-          : 0,
       lastUpdateCheck: lastCheck is String
           ? DateTime.tryParse(lastCheck)
           : null,
+      lastHolidayRefresh: lastHoliday is String
+          ? DateTime.tryParse(lastHoliday)
+          : null,
+      reminders: ReminderSettings.fromJson(json['reminders']),
+      calendarSuggestionDismissed: _stringMap(
+        json['calendarSuggestionDismissed'],
+      ),
+      termStartConfirmed: _stringMap(json['termStartConfirmed']),
       settingsVersion: currentVersion,
     );
+  }
+
+  /// 容错读 `{String: String}`：不是对象 → 空表；键或值不是字符串的条目丢掉。
+  static Map<String, String> _stringMap(Object? raw) {
+    final out = <String, String>{};
+    if (raw is! Map) return out;
+    raw.forEach((key, value) {
+      if (key is String && value is String) out[key] = value;
+    });
+    return out;
   }
 
   @override

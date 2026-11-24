@@ -1,0 +1,10 @@
+*.md
+*.py
+*.log
+*.txt
+.DS_Store
+Thumbs.db
+*.psd
+*.png.bak
+art/
+.omx/

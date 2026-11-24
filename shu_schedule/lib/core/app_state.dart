@@ -7,6 +7,7 @@ import '../models/period_time.dart';
 import '../models/schedule_config.dart';
 import '../models/timetable.dart';
 import 'presets.dart';
+import 'schedule_utils.dart';
 import 'storage.dart';
 
 /// 全局应用状态。所有写操作都会在变更后自动 [save]。
@@ -37,9 +38,32 @@ class AppState extends ChangeNotifier {
     return _timetables.first;
   }
 
-  /// 当前课表的配置；没有课表时返回内置默认配置。
+  /// 当前课表的配置；没有课表时返回按今天所在周周一暂定的空配置。
   ScheduleConfig get currentConfig =>
-      currentTimetable?.config ?? ScheduleConfig.defaults();
+      currentTimetable?.config ??
+      ScheduleConfig(
+        name: '我的课表',
+        startDate: ScheduleUtils.mondayOf(DateTime.now()),
+      );
+
+  /// 「刚导入完，请首页弹一次校历建议面板」（PLAN-1.5 D9 触发点 (a)）：值是课表 id。
+  /// 导入预览页写入成功、退回首页后调用 [requestCalendarPrompt]；`HomeShell` 监听它，
+  /// 处理时先把它清回 null。不写盘、不参与 [notifyListeners]。
+  final ValueNotifier<String?> pendingCalendarPromptFor =
+      ValueNotifier<String?>(null);
+
+  /// 请首页给课表 [timetableId] 弹一次校历建议面板（见 [pendingCalendarPromptFor]）。
+  /// 先清成 null 再设值：同一张课表连着导入两次也能再触发一次。
+  void requestCalendarPrompt(String timetableId) {
+    pendingCalendarPromptFor.value = null;
+    pendingCalendarPromptFor.value = timetableId;
+  }
+
+  @override
+  void dispose() {
+    pendingCalendarPromptFor.dispose();
+    super.dispose();
+  }
 
   // ------------------------------------------------------------ 加载 / 保存
 
@@ -64,17 +88,32 @@ class AppState extends ChangeNotifier {
   // -------------------------------------------------------------- 课表管理
 
   /// 新建一张空课表并切换过去，返回新课表。
+  ///
+  /// 没传 [config] 时按 [today]（默认 [DateTime.now]）所在周周一暂定开学日期；
+  /// [confirmTermStart] 为 true 时同时记入 `AppSettings.termStartConfirmed`。
   Future<Timetable> createTimetable({
     String name = '我的课表',
     ScheduleConfig? config,
+    bool confirmTermStart = false,
+    DateTime? today,
   }) async {
     final tt = Timetable(
       id: _uuid.v4(),
       name: name,
-      config: config ?? ScheduleConfig.defaults(),
+      config:
+          config ??
+          ScheduleConfig(
+            name: name,
+            startDate: ScheduleUtils.mondayOf(today ?? DateTime.now()),
+          ),
     );
     _timetables.add(tt);
     _settings.currentTimetableId = tt.id;
+    if (confirmTermStart) {
+      _settings.termStartConfirmed[tt.id] = ScheduleConfig.dateKey(
+        tt.config.startDate,
+      );
+    }
     await _commit();
     return tt;
   }
@@ -95,6 +134,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> deleteTimetable(String id) async {
     _timetables.removeWhere((t) => t.id == id);
+    _settings.calendarSuggestionDismissed.remove(id);
+    _settings.termStartConfirmed.remove(id);
     if (_settings.currentTimetableId == id) {
       _settings.currentTimetableId = _timetables.isEmpty
           ? ''
@@ -113,6 +154,7 @@ class AppState extends ChangeNotifier {
   ///
   /// [overwriteId] 指向一张存在的课表时覆盖它：换掉课程、配置和导入元数据，
   /// **保留 `Timetable.name`**（用户起的名字）；否则新建一张名为 [name] 的课表并切换过去。
+  /// [confirmTermStart] 为 true 时同时把开学日期记进 `AppSettings.termStartConfirmed`。
   Future<Timetable> applyImport({
     String? overwriteId,
     required String name,
@@ -122,6 +164,7 @@ class AppState extends ChangeNotifier {
     String? systemType,
     String? termCode,
     DateTime? importedAt,
+    bool confirmTermStart = false,
   }) async {
     final existing = overwriteId == null ? null : _byId(overwriteId);
     final Timetable tt;
@@ -147,6 +190,11 @@ class AppState extends ChangeNotifier {
       );
       _timetables.add(tt);
       _settings.currentTimetableId = tt.id;
+    }
+    if (confirmTermStart) {
+      _settings.termStartConfirmed[tt.id] = ScheduleConfig.dateKey(
+        tt.config.startDate,
+      );
     }
     await _commit();
     return tt;
@@ -250,11 +298,45 @@ class AppState extends ChangeNotifier {
   Future<void> updateConfig(
     ScheduleConfig config, {
     String? timetableId,
+    bool confirmTermStart = false,
   }) async {
     final tt =
         _byId(timetableId ?? _settings.currentTimetableId) ?? currentTimetable;
     if (tt == null) return;
     tt.config = config;
+    if (confirmTermStart) {
+      _settings.termStartConfirmed[tt.id] = ScheduleConfig.dateKey(
+        tt.config.startDate,
+      );
+    }
+    await _commit();
+  }
+
+  /// 撤销一次配置修改（校历建议「一键套用」、学期设置「学校校历」的「撤销」），
+  /// 同时把 `termStartConfirmed` 和（可选）`calendarSuggestionDismissed` 还原回修改前的值。
+  Future<void> restoreTimetableConfig(
+    String timetableId,
+    ScheduleConfig previousConfig, {
+    required String? previousConfirmedStart,
+    bool restoreDismissed = false,
+    String? previousDismissedKey,
+  }) async {
+    final tt = _byId(timetableId);
+    if (tt == null) return;
+    tt.config = previousConfig;
+    if (previousConfirmedStart == null) {
+      _settings.termStartConfirmed.remove(timetableId);
+    } else {
+      _settings.termStartConfirmed[timetableId] = previousConfirmedStart;
+    }
+    if (restoreDismissed) {
+      if (previousDismissedKey == null) {
+        _settings.calendarSuggestionDismissed.remove(timetableId);
+      } else {
+        _settings.calendarSuggestionDismissed[timetableId] =
+            previousDismissedKey;
+      }
+    }
     await _commit();
   }
 
@@ -268,6 +350,60 @@ class AppState extends ChangeNotifier {
         _byId(timetableId ?? _settings.currentTimetableId) ?? currentTimetable;
     if (tt == null) return;
     tt.config = tt.config.withOverride(date, value);
+    await _commit();
+  }
+
+  /// 一次写入多天的调休 / 停课（「套用节假日安排」），只保存一次。
+  ///
+  /// 只覆盖 [values] 里的日期，其余已有设置原样保留。
+  Future<void> applyDateOverrides(
+    Map<DateTime, DateOverride> values, {
+    String? timetableId,
+  }) async {
+    final tt =
+        _byId(timetableId ?? _settings.currentTimetableId) ?? currentTimetable;
+    if (tt == null || values.isEmpty) return;
+    final next = Map<String, DateOverride>.from(tt.config.overrides);
+    values.forEach((date, value) {
+      next[ScheduleConfig.dateKey(date)] = value;
+    });
+    tt.config = tt.config.copyWith(overrides: next);
+    await _commit();
+  }
+
+  /// 校历建议「一键套用」（v1.5.0，PLAN-1.5 D9）：[startDate] 非 null 时改开学日期，
+  /// 再写入 [overrides] 里的调休 / 停课（其余已有设置原样保留），同时确认开学日期、
+  /// （给了 [termKey] 时）记录本学期指纹，只保存一次。
+  ///
+  /// 返回套用前的配置；课表不存在返回 null。
+  Future<ScheduleConfig?> applyCalendarSuggestion(
+    String timetableId, {
+    DateTime? startDate,
+    Map<DateTime, DateOverride> overrides = const <DateTime, DateOverride>{},
+    String? termKey,
+  }) async {
+    final tt = _byId(timetableId);
+    if (tt == null) return null;
+    final previous = tt.config;
+    final next = Map<String, DateOverride>.from(previous.overrides);
+    overrides.forEach((date, value) {
+      next[ScheduleConfig.dateKey(date)] = value;
+    });
+    tt.config = previous.copyWith(startDate: startDate, overrides: next);
+    _settings.termStartConfirmed[timetableId] = ScheduleConfig.dateKey(
+      tt.config.startDate,
+    );
+    if (termKey != null) {
+      _settings.calendarSuggestionDismissed[timetableId] = termKey;
+    }
+    await _commit();
+    return previous;
+  }
+
+  /// 校历建议面板点了「先不用」：记下学期内容指纹 `termKey`，
+  /// 同一学校同一学期的条目没变时启动不再弹（`AppSettings.calendarSuggestionDismissed`）。
+  Future<void> dismissCalendarSuggestion(String timetableId, String key) async {
+    _settings.calendarSuggestionDismissed[timetableId] = key;
     await _commit();
   }
 
@@ -326,43 +462,53 @@ class AppState extends ChangeNotifier {
     await _commit();
   }
 
-  /// 记录用户同意了第 [version] 版隐私说明。
-  Future<void> acceptPrivacy(int version) async {
-    _settings.privacyAcceptedVersion = version;
-    await _commit();
-  }
-
   /// 记录一次检查更新的时间（每天最多自动查一次靠它）。
   Future<void> setLastUpdateCheck(DateTime time) async {
     _settings.lastUpdateCheck = time;
     await _commit();
   }
 
+  /// 记录一次联网刷新假日表的时间（24 小时节流靠它，v1.4.0）。
+  Future<void> setLastHolidayRefresh(DateTime time) async {
+    _settings.lastHolidayRefresh = time;
+    await _commit();
+  }
+
+  /// 修改上课提醒偏好（v1.4.0）。提醒的重新排程由 `ReminderService`
+  /// 监听 AppState 变化完成，这里只负责存。
+  Future<void> setReminderSettings(ReminderSettings value) async {
+    if (_settings.reminders == value) return;
+    _settings.reminders = value;
+    await _commit();
+  }
+
   /// 备份恢复：整体替换所有数据。
   ///
   /// 覆盖前会把现有 `timetables.json` 另存一份
-  /// （`timetables.json.before-restore-<时间戳>`），恢复错了还能手工捞回来。
+  /// （`timetables.json.before-restore-<时间戳>`），恢复错了还能手工捞回来；
+  /// 路径只打到 debugPrint，不进 [warnings]。
   /// 同时修掉备份里可能存在的重复/缺失 id，并保证 `currentTimetableId` 不悬空。
   Future<void> restoreFrom(StorageSnapshot snapshot) async {
     final restoreWarnings = <String>[...snapshot.warnings];
     final backup = await Storage.backupBeforeRestore();
-    if (backup != null) {
-      restoreWarnings.add('恢复前的旧数据已备份到 $backup。');
-    }
+    // 旧数据的备份路径只写日志，不进 warnings：它会变成设置页顶部的红卡
+    // 「读取数据时发现问题」，对学生是噪音（PLAN-1.5 任务 E）。
+    if (backup != null) debugPrint('恢复前的旧数据已备份到 $backup');
 
     final restored = List<Timetable>.from(snapshot.timetables);
     Storage.normalizeIds(restored, restoreWarnings);
 
-    // 隐私同意 / 检查更新时间是「这台手机上的这个 App」的状态，不跟着备份走：
-    // 恢复一份旧备份不应该让用户再同意一次隐私说明，也不应该重置更新节流。
-    final keepPrivacy = _settings.privacyAcceptedVersion;
+    // 检查更新时间 / 假日表刷新时间是「这台手机上的这个 App」的状态，
+    // 不跟着备份走：恢复一份旧备份不应该重置每天一次的节流。
+    // 上课提醒偏好（reminders）是用户偏好，跟着备份走（旧备份没有 → 关闭）；
+    // 通知权限状态本来就不存。
     final keepLastCheck = _settings.lastUpdateCheck;
+    final keepHolidayRefresh = _settings.lastHolidayRefresh;
     _timetables = restored;
     _settings = snapshot.settings;
-    if (keepPrivacy > _settings.privacyAcceptedVersion) {
-      _settings.privacyAcceptedVersion = keepPrivacy;
-    }
     _settings.lastUpdateCheck = keepLastCheck ?? _settings.lastUpdateCheck;
+    _settings.lastHolidayRefresh =
+        keepHolidayRefresh ?? _settings.lastHolidayRefresh;
     if (_timetables.isEmpty) {
       _settings.currentTimetableId = '';
     } else if (!_timetables.any((t) => t.id == _settings.currentTimetableId)) {

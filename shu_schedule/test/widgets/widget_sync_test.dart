@@ -217,15 +217,20 @@ void main() {
       );
     });
 
-    // v1.2.0 起只剩一个小组件，refreshTargets 里多写一个已经不存在的 Provider
-    // 会让每次 push 都吞一个异常，少写则小组件收不到刷新。
-    test('refreshTargets 只有唯一那个 Provider', () {
+    // refreshTargets 里多写一个已经不存在的 Provider 会让每次 push 都吞一个异常，
+    // 少写则那个小组件收不到刷新。v1.4.0 起是 4×2 + 2×1「下一节」两个。
+    test('refreshTargets 正好是 4×2 和 2×1 两个 Provider', () {
       expect(WidgetSync.refreshTargets, <String>[
         WidgetSync.dayProviderQualified,
+        WidgetSync.nextProviderQualified,
       ]);
       expect(
         WidgetSync.dayProviderQualified,
         'cn.shu.schedule.widgets.DayWidgetProvider',
+      );
+      expect(
+        WidgetSync.nextProviderQualified,
+        'cn.shu.schedule.widgets.NextWidgetProvider',
       );
     });
 

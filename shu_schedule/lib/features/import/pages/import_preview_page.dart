@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/app_state.dart';
+import '../../../core/holiday_presets.dart';
 import '../../../core/presets.dart';
 import '../../../core/schedule_utils.dart';
+import '../../../core/term_resolver.dart';
 import '../../../models/course.dart';
 import '../../../models/period_time.dart';
 import '../../../models/schedule_config.dart';
+import '../../../models/timetable.dart';
+import '../../settings/week_number_sheet.dart';
 import '../adapters/school_adapter.dart';
-import '../adapters/zfsoft_adapter.dart';
 import '../diagnostics/diagnostic_sample.dart';
 
 /// 导入方式。
@@ -86,21 +89,15 @@ class ImportPreviewDefaults {
     }
     return PeriodChoice.template(periodTemplateById(periodProfileId));
   }
-
-  /// 开学日期：识别到周次时用推断出的第 1 周周一；否则取 [today] 最近的周一，
-  /// 并要求用户确认（[startDateNeedsConfirm]）。
-  static DateTime startDate(ImportResult result, DateTime today) {
-    final detected = result.detectedStartDate;
-    if (detected != null) return ScheduleUtils.mondayOf(detected);
-    return ScheduleUtils.nearestMonday(today);
-  }
-
-  /// 开学日期是不是猜的（需要用户确认）。
-  static bool startDateNeedsConfirm(ImportResult result) =>
-      result.detectedStartDate == null;
 }
 
 /// 导入流程第三步：预览并确认。
+///
+/// v1.5.0（PLAN-1.5 D8）：开学日期按 [resolveTermStart] 定——教务识别到周次就直接用；
+/// 否则学校校历里有「今天」所在的学期就用它当默认值（「按××大学校历 · 9月14日开学 ·
+/// 现在第 4 周」），点「确认导入」时再弹一次「现在是第几周？」面板（预选校历推出的周次）；
+/// 都没有就弹同一个面板、不预选，不选不能导入。不再默认「今天所在的周是第一周」。
+/// 导入成功、退回首页后请首页弹一次校历建议面板（`AppState.requestCalendarPrompt`）。
 class ImportPreviewPage extends StatefulWidget {
   const ImportPreviewPage({
     super.key,
@@ -110,15 +107,16 @@ class ImportPreviewPage extends StatefulWidget {
     this.diagnostics,
     this.onImported,
     this.today,
+    this.holidayPresets,
   });
 
   final ImportResult result;
   final String schoolName;
 
-  /// 学校适配器：提供学期预设（快捷选项）和作息模板 id，可空。
+  /// 学校适配器：提供 `schools.json` 里的学期预设（校历来源之一）和作息模板 id，可空。
   final SchoolAdapter? adapter;
 
-  /// 诊断样本原料；非 null 时右上角显示「导出诊断样本」。
+  /// 诊断样本原料；非 null 时右上角显示「导出导入记录」。
   final DiagnosticInput? diagnostics;
 
   /// 课表写入成功、退回首页之前调用（清理教务登录态）。失败不影响导入。
@@ -127,13 +125,28 @@ class ImportPreviewPage extends StatefulWidget {
   /// 「今天」，测试用；默认 `DateTime.now()`。
   final DateTime? today;
 
+  /// 当前的假日表（`holidays.json` 里的学校校历）。由打开本页的一方先读好传进来，
+  /// 页面里不做 IO；null 当作空表。
+  final HolidayPresets? holidayPresets;
+
   @override
   State<ImportPreviewPage> createState() => _ImportPreviewPageState();
 }
 
 class _ImportPreviewPageState extends State<ImportPreviewPage> {
-  late DateTime _startDate;
-  late bool _startDateConfirmed;
+  late final DateTime _today;
+
+  /// 学校 id（`r.schoolId ?? widget.adapter?.id`），解析校历和写入课表共用同一个来源。
+  late final String? _schoolId;
+
+  /// 进页面时推出来的开学日期和来源（[resolveTermStart]）。
+  late final TermResolution _resolution;
+
+  /// 第 1 周周一；来源未知且用户还没选时为 null。
+  DateTime? _startDate;
+
+  /// 用户在面板里选过周次（「改」/「点这里选」/ 确认时的面板）。选过就直接导入。
+  bool _manual = false;
   late int _totalWeeks;
   late String _name;
   late Set<String> _selected;
@@ -145,12 +158,22 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
   void initState() {
     super.initState();
     final r = widget.result;
-    _startDate = ImportPreviewDefaults.startDate(
-      r,
-      widget.today ?? DateTime.now(),
+    _today = widget.today ?? DateTime.now();
+    _schoolId = r.schoolId ?? widget.adapter?.id;
+    _resolution = resolveTermStart(
+      detectedStart: r.detectedStartDate,
+      detectedWeek: r.detectedCurrentWeek,
+      schoolId: _schoolId,
+      presets: widget.holidayPresets ?? HolidayPresets.empty,
+      schoolPresets: widget.adapter?.presets,
+      schoolName: widget.schoolName,
+      today: _today,
     );
-    _startDateConfirmed = !ImportPreviewDefaults.startDateNeedsConfirm(r);
-    _totalWeeks = 18;
+    _startDate = _resolution.startDate;
+    _totalWeeks = (_resolution.totalWeeks ?? 18).clamp(
+      _minTotalWeeks,
+      _maxTotalWeeks,
+    );
     _name = r.termName ?? r.rawTermName ?? '导入的课表';
     _selected = r.courses.map((c) => c.id).toSet();
     _periodChoice = ImportPreviewDefaults.periods(
@@ -197,27 +220,73 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
 
   // ------------------------------------------------------------------ 交互
 
-  Future<void> _pickStartDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _startDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2035, 12, 31),
-      helpText: '选择本学期第一周的周一',
+  /// 现在的开学日期下，「今天」是第几周；还没定开学日期时为 null。
+  int? get _currentWeek {
+    final start = _startDate;
+    return start == null ? null : weekNumberOn(start, _today);
+  }
+
+  /// 「按××大学校历」里的学校名。
+  String get _schoolLabel => _resolution.schoolName ?? widget.schoolName;
+
+  /// 「开学日期」一行的「改」/「点这里选」：弹「现在是第几周？」面板，选了就算手动选过。
+  Future<void> _pickWeek() async {
+    final picked = await showWeekNumberSheet(
+      context,
+      today: _today,
+      totalWeeks: _totalWeeks,
+      initialWeek: _currentWeek,
+      upcomingStart: _resolution.upcoming ? _resolution.startDate : null,
     );
     if (picked == null || !mounted) return;
     setState(() {
-      _startDate = ScheduleUtils.mondayOf(picked);
-      _startDateConfirmed = true;
+      _startDate = picked;
+      _manual = true;
     });
   }
 
-  void _applyPreset(TermPreset preset) {
+  /// 点「确认导入」时：开学日期是教务识别的、或用户手动选过 → 直接过；
+  /// 按校历推的（学期内）→ 弹面板预选校历周次，标题「按××大学校历，现在是第 4 周，对吗？」；
+  /// 按校历推的（开学前）→ 弹面板默认选中「还没开学」，标题「按××大学校历，9月14日开学，对吗？」；
+  /// 不知道 → 弹面板不预选。关掉面板 = 不导入，留在预览页。
+  Future<bool> _ensureStartDate() async {
+    if (_manual || _resolution.source == TermStartSource.detected) {
+      return _startDate != null;
+    }
+    if (_resolution.source == TermStartSource.schoolCalendar &&
+        _resolution.upcoming &&
+        _resolution.startDate != null) {
+      final upcomingStart = _resolution.startDate!;
+      final picked = await showWeekNumberSheet(
+        context,
+        today: _today,
+        totalWeeks: _totalWeeks,
+        upcomingStart: upcomingStart,
+        title: '按$_schoolLabel校历，${monthDayText(upcomingStart)}开学，对吗？',
+      );
+      if (picked == null || !mounted) return false;
+      setState(() {
+        _startDate = picked;
+        _manual = true;
+      });
+      return true;
+    }
+    final week = _currentWeek;
+    final calendar =
+        _resolution.source == TermStartSource.schoolCalendar && week != null;
+    final picked = await showWeekNumberSheet(
+      context,
+      today: _today,
+      totalWeeks: _totalWeeks,
+      initialWeek: calendar ? week : null,
+      title: calendar ? '按$_schoolLabel校历，现在是第 $week 周，对吗？' : null,
+    );
+    if (picked == null || !mounted) return false;
     setState(() {
-      _startDate = ScheduleUtils.mondayOf(preset.startDate);
-      _totalWeeks = preset.totalWeeks.clamp(_minTotalWeeks, _maxTotalWeeks);
-      _startDateConfirmed = true;
+      _startDate = picked;
+      _manual = true;
     });
+    return true;
   }
 
   Future<void> _pickPeriods() async {
@@ -257,34 +326,6 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
     return '${c.periods.first.start} 开始 · ${c.periods.last.end} 结束';
   }
 
-  /// 开学日期是猜的：先问一句。返回 true = 按当前日期继续。
-  Future<bool> _confirmGuessedStartDate() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('确认开学日期'),
-        content: Text(
-          '没有从教务系统识别到当前周次。\n'
-          '本学期第一周的周一设为 ${ZfsoftAdapter.formatDate(_startDate)}，对吗？\n\n'
-          '日期不对的话周次会整体错开，之后也可以在「学期设置」里改。',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('重新选择'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('对，导入'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) return true;
-    if (mounted) await _pickStartDate();
-    return false;
-  }
-
   Future<void> _confirm() async {
     final courses = _selectedCourses;
     if (courses.isEmpty) {
@@ -292,11 +333,8 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
           .showSnackBar(const SnackBar(content: Text('请至少选择一门课程')));
       return;
     }
-    if (!_startDateConfirmed) {
-      final go = await _confirmGuessedStartDate();
-      if (!go || !mounted) return;
-      _startDateConfirmed = true;
-    }
+    if (!await _ensureStartDate() || !mounted) return;
+    final startDate = _startDate!;
     setState(() => _busy = true);
     final appState = context.read<AppState>();
     final messenger = ScaffoldMessenger.of(context);
@@ -304,36 +342,41 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
     final r = widget.result;
     final periods = List<PeriodTime>.from(_periodChoice.periods);
 
+    final String importedId;
     try {
       // 没有课表时只能新建（build 里也会把单选框锁在「新建」上）。
       final current = appState.currentTimetable;
       final overwrite = _mode == ImportMode.overwrite && current != null;
-      await appState.applyImport(
+      final imported = await appState.applyImport(
         overwriteId: overwrite ? current.id : null,
         name: _name,
         courses: courses,
         config: overwrite
             ? current.config.copyWith(
                 name: _name,
-                startDate: _startDate,
+                startDate: startDate,
                 totalWeeks: _totalWeeks,
                 periods: periods,
               )
             : ScheduleConfig(
                 name: _name,
-                startDate: _startDate,
+                startDate: startDate,
                 totalWeeks: _totalWeeks,
                 periods: periods,
               ),
-        schoolId: r.schoolId,
+        schoolId: _schoolId,
         systemType: r.systemType,
         termCode: r.termCode,
         importedAt: DateTime.now(),
+        confirmTermStart:
+            _manual || _resolution.source == TermStartSource.detected,
       );
+      importedId = imported.id;
     } catch (e) {
+      debugPrint('保存课表失败：$e');
       if (!mounted) return;
       setState(() => _busy = false);
-      messenger.showSnackBar(SnackBar(content: Text('保存失败：$e')));
+      messenger.showSnackBar(const SnackBar(content: Text('保存课表失败，请重试')));
       return;
     }
 
@@ -345,8 +388,10 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
     if (!mounted) return;
     navigator.popUntil((route) => route.isFirst);
     messenger.showSnackBar(
-      SnackBar(content: Text('已导入 ${courses.length} 门课程')),
+      SnackBar(content: Text('已导入 ${Timetable.formatCourseCount(courses)}')),
     );
+    // 首页下一帧弹校历建议面板（PLAN-1.5 D9 触发点 (a)）。
+    appState.requestCalendarPrompt(importedId);
   }
 
   Future<void> _exportDiagnostics() async {
@@ -356,7 +401,8 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
     try {
       await DiagnosticSample.exportAndShare(input);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('导出诊断样本失败：$e')));
+      debugPrint('导出导入记录失败：$e');
+      messenger.showSnackBar(const SnackBar(content: Text('导出导入记录失败，请稍后再试')));
     }
   }
 
@@ -376,7 +422,7 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
         actions: <Widget>[
           if (widget.diagnostics != null)
             IconButton(
-              tooltip: '导出诊断样本',
+              tooltip: '导出导入记录',
               icon: const Icon(Icons.bug_report_outlined),
               onPressed: _busy ? null : _exportDiagnostics,
             ),
@@ -404,7 +450,9 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text('确认导入（${_selected.length} 门）'),
+                : Text(
+                    '确认导入（${Timetable.uniqueCourseCount(_selectedCourses)} 门）',
+                  ),
           ),
         ),
       ),
@@ -432,17 +480,7 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
             ),
           ),
           const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.event),
-            title: const Text('开学日期（第 1 周周一）'),
-            subtitle: Text(
-              '${ZfsoftAdapter.formatDate(_startDate)}　'
-              '${r.detectedCurrentWeek != null ? '教务系统显示当前第 ${r.detectedCurrentWeek} 周' : (_startDateConfirmed ? '已手动选择' : '未识别到周次，请确认')}',
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: _pickStartDate,
-          ),
-          if (r.detectedStartDate == null) _buildStartDatePrompt(theme),
+          _buildStartDateTile(theme),
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.date_range),
@@ -478,44 +516,47 @@ class _ImportPreviewPageState extends State<ImportPreviewPage> {
     );
   }
 
-  /// 没识别到周次：提示用户选第一周的周一，有校历预设时给快捷选项。
-  Widget _buildStartDatePrompt(ThemeData theme) {
-    final presets = widget.adapter?.presets ?? const <TermPreset>[];
-    return Container(
-      width: double.infinity,
-      color: _startDateConfirmed
-          ? theme.colorScheme.surfaceContainerHighest
-          : theme.colorScheme.errorContainer.withValues(alpha: 0.35),
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            '没有从教务系统识别到当前周次。请选择本学期第一周的周一，'
-            '否则周次会整体错开。',
-            style: theme.textTheme.bodySmall,
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: <Widget>[
-              OutlinedButton.icon(
-                onPressed: _pickStartDate,
-                icon: const Icon(Icons.calendar_month, size: 18),
-                label: const Text('选择日期'),
-              ),
-              for (final p in presets)
-                ActionChip(
-                  label: Text(
-                    '${p.name} · ${ZfsoftAdapter.formatDate(p.startDate)}',
-                  ),
-                  onPressed: () => _applyPreset(p),
-                ),
-            ],
-          ),
-        ],
+  /// 「开学日期」一行（D8）：
+  /// - 教务识别：「9月14日（周一）　教务系统显示当前第 3 周」+「改」；
+  /// - 按校历：「按××大学校历 · 9月14日开学 · 现在第 4 周」+「改」；
+  /// - 手动选过：「9月14日开学 · 现在第 4 周 · 已手动选择」+「改」；
+  /// - 不知道：「还没确定 · 点这里选」。
+  Widget _buildStartDateTile(ThemeData theme) {
+    final start = _startDate;
+    final week = _currentWeek;
+    final String text;
+    if (start == null) {
+      text = _resolution.label;
+    } else if (_manual) {
+      text = <String>[
+        '${monthDayText(start)}开学',
+        if (week != null && week >= 1) '现在第 $week 周',
+        '已手动选择',
+      ].join(' · ');
+    } else if (_resolution.source == TermStartSource.detected) {
+      text =
+          '${monthDayText(start)}（${weekdayNamesCn[start.weekday]}）　'
+          '${_resolution.label}';
+    } else {
+      text = _resolution.label;
+    }
+    return ListTile(
+      key: const ValueKey<String>('import-start-date'),
+      leading: const Icon(Icons.event),
+      title: const Text('开学日期'),
+      subtitle: Text(
+        text,
+        key: const ValueKey<String>('import-start-date-text'),
+        style: start == null ? TextStyle(color: theme.colorScheme.error) : null,
       ),
+      trailing: start == null
+          ? const Icon(Icons.chevron_right)
+          : TextButton(
+              key: const ValueKey<String>('import-start-date-change'),
+              onPressed: _pickWeek,
+              child: const Text('改'),
+            ),
+      onTap: _pickWeek,
     );
   }
 

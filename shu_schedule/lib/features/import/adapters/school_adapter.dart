@@ -161,7 +161,7 @@ class ImportResult {
   final String? studentName;
 
   /// 推断出的开学日期（第 1 周周一）。识别不到周次时为 null，
-  /// 由预览页让用户自己选，**不再拿某所学校的校历去猜**。
+  /// 由预览页按学校校历给默认值、或问用户「现在是第几周？」（v1.5.0，`resolveTermStart`）。
   final DateTime? detectedStartDate;
 
   /// 从教务页面文本识别到的当前周次。
@@ -246,7 +246,9 @@ abstract class SchoolAdapter {
   /// WebView 使用的 User-Agent；null = 系统默认。
   String? get userAgent;
 
-  /// 这所学校的学期预设（校历），可空。只作为预览页里的快捷选项，不会自动套用。
+  /// 这所学校的学期预设（`schools.json` 里的校历），可空。没识别到周次时，预览页把
+  /// 覆盖「今天」的那一期当作默认开学日期（和 `holidays.json` 的学校学期一起，
+  /// 后者优先；v1.5.0，`resolveTermStart`）。
   List<TermPreset>? get presets;
 
   /// 作息模板 id（`periodTemplates`），可空。

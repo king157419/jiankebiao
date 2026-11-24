@@ -298,8 +298,9 @@ Future<String> loadPrivacyText(BuildContext context) async {
     return await DefaultAssetBundle.of(context)
         .loadString(PrivacyPolicy.assetPath);
   } catch (_) {
-    return '# 隐私说明\n\n隐私说明文件读取失败。简要说明：${AppBrand.name}不收集、不上传你的课表，'
-        '所有数据只保存在这台手机上；只有在你导入课表或检查更新时才会联网。';
+    return '# 隐私说明\n\n隐私说明没能读出来。简单说：你的课表只存在手机里，'
+        '${AppBrand.name}不收集、不上传；只在从教务导入、检查新版本、'
+        '更新假期表时联网。';
   }
 }
 
@@ -327,71 +328,4 @@ class PrivacyPage extends StatelessWidget {
       ),
     );
   }
-}
-
-/// 首次启动的一次性「隐私说明」确认。返回 true = 同意。
-///
-/// 不能点外面关掉、不能按返回键关掉；「不同意」由调用方决定怎么办（HomeShell 会退出 App）。
-Future<bool> showPrivacyConsentDialog(BuildContext context) async {
-  final result = await showDialog<bool>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogContext) => PopScope(
-      canPop: false,
-      child: AlertDialog(
-        key: const ValueKey<String>('privacy-consent'),
-        title: const Text('隐私说明'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('欢迎使用${AppBrand.name}。开始之前请花一分钟了解：'),
-              const SizedBox(height: 10),
-              const Text('· 课表、作息、设置只保存在这台手机上，没有服务器，不上传。'),
-              const Text(
-                '· 只在两种情况下联网：你主动「从教务导入」时打开学校的教务网页；'
-                '每天最多一次检查新版本（会暴露你的 IP 地址给下载服务器）。',
-              ),
-              const Text('· 不需要注册账号，不读取通讯录、位置、相册，没有广告和统计 SDK。'),
-              const Text('· 教务密码只在学校自己的网页里输入，App 不保存。'),
-              const SizedBox(height: 10),
-              Text(
-                '同意之前，App 不会发出任何网络请求。',
-                style: TextStyle(
-                  color: Theme.of(dialogContext).colorScheme.primary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  key: const ValueKey<String>('privacy-read-full'),
-                  onPressed: () => Navigator.of(dialogContext).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const PrivacyPage(),
-                    ),
-                  ),
-                  child: const Text('阅读完整隐私说明'),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            key: const ValueKey<String>('privacy-decline'),
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('不同意并退出'),
-          ),
-          FilledButton(
-            key: const ValueKey<String>('privacy-accept'),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('同意'),
-          ),
-        ],
-      ),
-    ),
-  );
-  return result ?? false;
 }

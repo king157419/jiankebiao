@@ -51,6 +51,28 @@ class Timetable {
   static String sourceTagOf(String systemType, String schoolId) =>
       '$systemType-$schoolId';
 
+  /// 按「同名 + 同教师」去重后的课程门数（同一门课一周多个时段只算 1 门，PLAN-1.5 R1-13）。
+  static int uniqueCourseCount(Iterable<Course> courses) {
+    final seen = <String>{};
+    for (final c in courses) {
+      final name = c.name.trim();
+      final teacher = (c.teacher ?? '').trim();
+      seen.add('$name\u0000$teacher');
+    }
+    return seen.length;
+  }
+
+  /// 「x 门课」展示文案：同名 + 同教师算一门；时段条数多于门数时补上「（每周 y 节）」。
+  static String formatCourseCount(List<Course> courses) {
+    if (courses.isEmpty) return '0 门课';
+    final unique = uniqueCourseCount(courses);
+    final sessions = courses.length;
+    return sessions > unique ? '$unique 门课（每周 $sessions 节）' : '$unique 门课';
+  }
+
+  /// 当前课表的课程数量文案（见 [formatCourseCount]）。
+  String get courseCountText => formatCourseCount(courses);
+
   Timetable copyWith({
     String? id,
     String? name,

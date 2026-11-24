@@ -5,6 +5,8 @@ import '../core/theme/app_theme.dart';
 /// 通用空状态：表情 + 标题 + 说明 + 最多两个入口。
 ///
 /// 插画只是装饰，含义由文字完整表达（DESIGN.md §6）。
+/// 给了 [keyPrefix] 时两个按钮分别带 key `<prefix>-primary` / `-secondary`
+/// （测试和截图脚本用）。
 class EmptyState extends StatelessWidget {
   final AppTheme theme;
   final String emoji;
@@ -14,6 +16,9 @@ class EmptyState extends StatelessWidget {
   final VoidCallback? onPrimary;
   final String? secondaryLabel;
   final VoidCallback? onSecondary;
+
+  /// 按钮 key 的前缀；null 时按钮不带 key。
+  final String? keyPrefix;
 
   const EmptyState({
     super.key,
@@ -25,13 +30,17 @@ class EmptyState extends StatelessWidget {
     this.onPrimary,
     this.secondaryLabel,
     this.onSecondary,
+    this.keyPrefix,
   });
+
+  Key? _buttonKey(String slot) =>
+      keyPrefix == null ? null : ValueKey<String>('$keyPrefix-$slot');
 
   @override
   Widget build(BuildContext context) {
     final colors = theme.colors;
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -60,11 +69,19 @@ class EmptyState extends StatelessWidget {
             ],
             if (primaryLabel != null) ...<Widget>[
               const SizedBox(height: 24),
-              FilledButton(onPressed: onPrimary, child: Text(primaryLabel!)),
+              FilledButton(
+                key: _buttonKey('primary'),
+                onPressed: onPrimary,
+                child: Text(primaryLabel!),
+              ),
             ],
             if (secondaryLabel != null) ...<Widget>[
               const SizedBox(height: 8),
-              TextButton(onPressed: onSecondary, child: Text(secondaryLabel!)),
+              TextButton(
+                key: _buttonKey('secondary'),
+                onPressed: onSecondary,
+                child: Text(secondaryLabel!),
+              ),
             ],
           ],
         ),

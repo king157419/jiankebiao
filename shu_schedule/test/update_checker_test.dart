@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shu_schedule/core/repo_config.dart';
 import 'package:shu_schedule/core/update/update_checker.dart';
 import 'package:shu_schedule/core/update/update_config.dart';
 import 'package:shu_schedule/core/update/update_dialog.dart';
@@ -36,6 +38,36 @@ void main() {
       ]);
       expect(info.firstDownloadUrl, info.downloadUrls.first);
       expect(info.sha256, sha);
+    });
+
+    test('v1.4.0：holidays.sha256 可选，解析成小写；缺失 / 不合法为 null', () {
+      final info = UpdateInfo.fromJson(<String, dynamic>{
+        'versionCode': 9,
+        'versionName': '1.4.0',
+        'holidays': <String, dynamic>{
+          'sha256': sha.toUpperCase(),
+          'updatedAt': '2026-10-06',
+        },
+      });
+      expect(info.holidaysSha256, sha);
+      expect(info.sha256, isNull);
+      expect(
+        UpdateInfo.fromJson(<String, dynamic>{
+          'versionCode': 9,
+          'versionName': '1.4.0',
+          'holidays': <String, dynamic>{'sha256': 'abc'},
+        }).holidaysSha256,
+        isNull,
+      );
+      expect(
+        UpdateInfo.fromJson(<String, dynamic>{
+          'versionCode': 9,
+          'versionName': '1.4.0',
+          'holidays': 'oops',
+        }).holidaysSha256,
+        isNull,
+      );
+      expect(UpdateInfo.fromJson(jsonDecode(latest())).holidaysSha256, isNull);
     });
 
     test('versionCode 可以是字符串数字；changelog 可以是数组；坏 sha256 丢掉', () {
@@ -82,12 +114,42 @@ void main() {
   });
 
   group('配置', () {
-    test('当前仓库里的源还是 OWNER/REPO 占位符 → 未配置', () {
+    test('源从 kRepo 派生；kRepo 还是 OWNER/REPO 占位符 → 未配置（不配 Gitee 时 2 个源）', () {
+      expect(kRepo.isPlaceholder, isTrue);
       expect(UpdateConfig.isConfigured, isFalse);
+      expect(UpdateChecker().isConfigured, isFalse);
+      expect(UpdateConfig.sources, <String>[
+        for (final u in kRepo.rawUrls('latest.json')) u.toString(),
+      ]);
       expect(UpdateConfig.sources.length, 2);
-      expect(UpdateConfig.sources.first, contains('raw.githubusercontent.com'));
-      expect(UpdateConfig.sources.last, contains('cdn.jsdelivr.net/gh/'));
+      expect(UpdateConfig.sources.first, contains('cdn.jsdelivr.net/gh/'));
+      expect(UpdateConfig.sources.last, contains('raw.githubusercontent.com'));
+      expect(
+        UpdateConfig.sources.every((s) => s.endsWith('/latest.json')),
+        isTrue,
+      );
+      expect(UpdateConfig.placeholder, 'OWNER/REPO');
       expect(UpdateConfig.perSourceTimeout, const Duration(seconds: 5));
+      expect(UpdateConfig.maxResponseBytes, 64 * 1024);
+    });
+
+    test('配置了真实仓库 + Gitee：latest.json 有 3 个源，Gitee 在最前', () {
+      const repo = RepoConfig(
+        githubOwner: 'someone',
+        githubRepo: 'jiankebiao',
+        giteeOwner: 'someone-cn',
+        giteeRepo: 'jiankebiao',
+      );
+      final urls = <String>[
+        for (final u in repo.rawUrls('latest.json')) u.toString(),
+      ];
+      expect(urls, <String>[
+        'https://gitee.com/someone-cn/jiankebiao/raw/main/latest.json',
+        'https://cdn.jsdelivr.net/gh/someone/jiankebiao@main/latest.json',
+        'https://raw.githubusercontent.com/someone/jiankebiao/main/latest.json',
+      ]);
+      expect(UpdateConfig.sourcesConfigured(urls), isTrue);
+      expect(UpdateChecker(sources: urls).isConfigured, isTrue);
     });
 
     test('sourcesConfigured：任何一个带占位符都算没配好；空列表也不算', () {
@@ -203,7 +265,7 @@ void main() {
       expect(r.errors.length, 2);
     });
 
-    test('默认网络实现只允许 https', () async {
+    test('默认网络实现只允许 https（带 maxBytes 参数的调用也一样）', () async {
       expect(
         () => UpdateChecker.httpFetch(
           Uri.parse('http://a.example/x'),
@@ -211,24 +273,25 @@ void main() {
         ),
         throwsA(anything),
       );
+      expect(
+        () => UpdateChecker.httpFetch(
+          Uri.parse('http://a.example/x'),
+          const Duration(seconds: 1),
+          maxBytes: 256 * 1024,
+        ),
+        throwsA(anything),
+      );
+      // 带可选参数的实现仍然能当作 UpdateFetch 注入。
+      const UpdateFetch f = UpdateChecker.httpFetch;
+      expect(f, isNotNull);
     });
   });
 
   group('自动检查节流 shouldAutoCheck', () {
     final now = DateTime(2026, 9, 23, 9);
-    test('没同意隐私说明 / 没配置：不查', () {
+    test('没配置：不查', () {
       expect(
         UpdateChecker.shouldAutoCheck(
-          privacyAccepted: false,
-          configured: true,
-          lastCheck: null,
-          now: now,
-        ),
-        isFalse,
-      );
-      expect(
-        UpdateChecker.shouldAutoCheck(
-          privacyAccepted: true,
           configured: false,
           lastCheck: null,
           now: now,
@@ -238,7 +301,6 @@ void main() {
     });
     test('从没查过：查；今天查过：不查；昨天查过（哪怕不到 24 小时）：查；时间在未来：查', () {
       bool go(DateTime? last) => UpdateChecker.shouldAutoCheck(
-        privacyAccepted: true,
         configured: true,
         lastCheck: last,
         now: now,
@@ -268,6 +330,35 @@ void main() {
         ),
         isFalse,
       );
+    });
+
+    testWidgets('「发现新版本」对话框：版本号、更新日志、下载说明；不显示校验值（v1.5.0 任务 E）', (tester) async {
+      final info = UpdateInfo.fromJson(jsonDecode(latest()));
+      expect(info.sha256, sha, reason: '照旧解析，只是不给用户看');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => showUpdateDialog(
+                  context,
+                  info,
+                  launcher: (_) async => true,
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('发现新版本 v1.3.1'), findsOneWidget);
+      expect(find.text('修复了小组件\n新增调休'), findsOneWidget);
+      expect(find.textContaining('点「去下载」会用系统浏览器打开下载页'), findsOneWidget);
+      expect(find.textContaining('SHA'), findsNothing);
+      expect(find.textContaining(sha), findsNothing);
+      expect(find.byType(SelectableText), findsNothing);
     });
   });
 }

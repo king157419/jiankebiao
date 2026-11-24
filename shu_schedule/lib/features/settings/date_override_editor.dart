@@ -222,7 +222,7 @@ class _DateOverrideEditorPageState extends State<DateOverrideEditorPage> {
           ],
           if (_draft.mode == OverrideMode.cancelled)
             Text(
-              '这一天的课全部不显示（今日页、周课表、桌面小组件一致）。',
+              '这一天的课全部不显示（周课表和桌面小组件都一样）。',
               style: TextStyle(fontSize: 12, color: muted),
             ),
           const SizedBox(height: 16),

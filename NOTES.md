@@ -1543,3 +1543,556 @@ Dart 侧在 `HomeShell` 里落地：`initState` 订阅 `NativeBridge.actions`，
 - 真机操作验证（截图 shots/v130/）：设置页新分组（记住教务登录、从文件导入课表、检查更新=未配置更新源禁用态、隐私说明、反馈）；学期设置 → 添加调休/停课 → 保存后周视图日期头显示「停课」且整列不画课、今日页显示「今天停课。」、桌面小组件当天显示无课；导入课表页显示「上海大学 已验证」+「我的学校不在列表」→ 输入含 /jwglxt 的网址识别为「正方教务（实验）」；周视图长按空格子打开新建课程并带入周六/第 1 节，编辑器有「复制到其他星期」「保存并继续添加」和教师/地点历史补全提示。
 - 没验证的：真实教务登录到导入（本机连不上 shu.edu.cn）、扫码外跳、Cookie 清理、诊断样本分享面板、单表分享/导入的系统文件选择器、检查更新的真实网络请求（更新源仍是 OWNER/REPO 占位）。
 - 遗留：小组件在停课日显示「这天没有课」而不是「停课」（Kotlin 未读 label）；更新源、Issues 地址、隐私说明里的开发者信息需要用户建好 GitHub 仓库后一次性替换；keystore 口令仍在 keys/README.txt 明文里，需要用户自己改口令并异地备份。
+
+## v1.3.1 (2026-10-06) 节假日一键套用
+
+学期设置 →「调休 / 停课」新增「套用节假日安排」：按内置数据一次勾选写入整学期的放假 / 补课；顺带修掉 1.3.0 的遗留「小组件停课日仍显示『这天没有课』」。版本 `1.3.1+8`，`appVersion = '1.3.1'`。没有新增网络请求（数据打包在 asset 里；「查看来源」只是交给系统浏览器打开），`privacy.md` 未改。
+
+### 数据：`assets/holidays.json`（已登记进 pubspec assets）
+- `national.2026`：国务院办公厅关于2026年部分节假日安排的通知（国办发明电〔2025〕7号，2025-11-04），
+  https://www.gov.cn/gongbao/2025/issue_12406/202511/content_7048922.html 。7 个节日，每个 `off`（放假）+ `work`（调休上班）。
+- `schools.shu.terms[0]`（2026-2027 学年秋季学期，2026-09-14 开学，18 周，13 条）：
+  校历 https://bksy.shu.edu.cn/jxxl/jnxl.htm （上海大学2026-2027学年校历，本科生院）；
+  放假通知 https://www.shu.edu.cn/info/1051/400395.htm （关于2026年中秋节、国庆节放假安排的通知，党政办公室，2026-09-08）。
+  9/20 上 10/6（周二）的课、10/10 上 10/7（周三）的课；9/25-27、10/1-7 停课；2027-01-01 停课（校历标注，补课以学校通知为准）。
+- 内容按任务给定的已核对版本逐字写入，本阶段没有再联网核对。
+
+### 规则（`lib/core/holiday_presets.dart`）
+- `HolidayPresets.fromJson`（容错：缺名字的节日、解析不了的日期、既不停课也没有合法 `actAsDate` 的学校条目、缺开学日期 / 周数的学期、同一天重复的条目都丢掉，不抛）；
+  `loadBundled()` 读 rootBundle 并缓存，读不到 / 坏 JSON → 空数据（页面显示空状态）。
+- `planFor(config, schoolId) → HolidayPlan{title, sourceText, sourceUrl, items}`；`suggestionsFor` = `planFor(...).items`。
+  学期范围 = `[startDate, startDate + totalWeeks*7 - 1]`（`ScheduleUtils.addDays`），只返回范围内的日期，按日期排序。
+- 学校路径：`schools[schoolId]` 里先找开学日期（对齐周一后按 dateKey）相同的学期，再找日期范围重叠的；
+  `cancelled` → `DateOverride.cancelled(note)`；`actAsDate` → `DateOverride.actAs(week: rawWeekOf(actAsDate, config), weekday: actAsDate.weekday, note)`，
+  算出的周 <1 或 >totalWeeks 时带 `warning`（仍可套用）。标题「<校名> · <学期名>」，来源 = 通知；校历（更新日期），链接优先通知。
+- 国家路径（没有 schoolId / 学校没有对得上的学期）：学期覆盖到的每个有数据的年份，`off` → 停课（备注「<节日>放假（国家安排）」）；
+  `work` → `override == null, needsConfirmation == true`，文案「9月20日（周日）国家调休上班，学校按哪天的课上要看教务通知后手动设置」。标题「国家法定节假日（2026）」。
+- `HolidaySuggestion.existing` = 当前课表那天已有的设置；`alreadyApplied`（相同）/ `conflicts`（不同）/ `applicable`（有 override 且未设置）。
+- `AppState.applyDateOverrides(Map<DateTime, DateOverride>, {timetableId})`：一次 `_commit()`（只通知 / 保存一次），只覆盖传入的日期，其余手动设置不动；空表 / 没课表是空操作。
+
+### 界面
+- `term_settings_page.dart`：「添加调休 / 停课」上方 `override-apply-holidays`（没课表时禁用），push `HolidayApplyPage`。
+- `holiday_apply_page.dart`：头部卡片（方案标题、来源、「查看来源」→ 复用 `core/update/update_dialog.dart` 的 `launchExternally`
+  ——`external_navigation.dart` 里只有纯函数 `planNavigation`，没有 launcher helper；固定提示「以学校教务通知为准…」）；
+  每条 `holiday-item-<yyyy-MM-dd>`：普通 → 默认勾；冲突 → 默认不勾 + 红字「将覆盖：…」；已设置 → 勾 + 禁用 + 右侧「已设置」；
+  需要确认 → 普通 ListTile + info 图标，没有勾选框；warning 红字。底部 `holiday-apply`「套用 N 条」（N=0 禁用）→ 写入、返回、SnackBar「已套用 N 条调休 / 停课」。
+  没有方案 → 「没有找到适用于当前学期的节假日安排」+ 手动添加提示。测试可注入 `presets`。
+
+### 小组件停课文案（Kotlin）
+- `WidgetSnapshot.kt`：`WidgetDay` 多了 `label` / `note`（`optStringOrNull`，缺 / null / 空白 → null）。
+- `DayWidgetProvider.render`：`label == "停课"` 时空态用新字符串 `widget_empty_today_cancelled`「今天停课，好好休息 ✨」（offset 0）/
+  `widget_empty_other_day_cancelled`「这天停课」，`note` 非空且不是「停课」（无备注时 Dart 写的是 description「停课」）时另起一行附上。调休日不变。
+
+### 质量门（真实跑过）
+- `flutter analyze` → `No issues found!`；`flutter test` → `+411: All tests passed!`（1.3.0 是 388，新增 23：
+  `holiday_presets_test.dart` 13、`app_state_holiday_apply_test.dart` 3、`holiday_apply_page_test.dart` 7）。
+  中途 `privacy_and_about_test` 的品牌扫描抓到 `holiday_presets.dart` 两处注释写了「上海大学」，已改成中性说法（校名只在 asset 里）。
+- `flutter build apk --release` → 55.7MB，`dist/简课表-v1.3.1.apk` = 58,357,106 B，aapt2 `versionCode='8' versionName='1.3.1'`、label 简课表。
+- **arm64 包没有用 `--split-per-abi` 的产物**：按任务先跑了 `flutter build apk --release --split-per-abi`（成功），但 aapt2 显示 arm64 分包是
+  `versionCode='2008'`（Flutter 给分包加 ABI 前缀 2000）。而 `dist/简课表-v1.3.0-arm64.apk` 是 `versionCode='7'`——装了 2008 的人以后无法再
+  覆盖安装 universal 的 9、10…，升级链会断。所以改用 1.3.0 同样的方式 `flutter build apk --release --target-platform android-arm64` 重打：
+  `dist/简课表-v1.3.1-arm64.apk` = 21,177,992 B，`versionCode='8' versionName='1.3.1'`；`unzip -l` 的 lib/ 结构和 1.3.0 arm64 包完全一致
+  （libflutter / libapp 只有 arm64-v8a；libdartjni、libdatastore_shared_counter 三个 ABI 都有，所以 aapt2 的 native-code 列出三个 ABI——
+  这意味着 32 位 armv7 手机能装上但会因缺 libflutter 闪退，1.3.0 起就这样，没改）。
+
+### 模拟器（shu35，API 35，截图 `shots/v131/`）
+- `adb install -r` universal 包覆盖 1.3.0（versionCode 7 → 8），示例课表与已有的 9/23 停课保留。示例课表开学日期本来就是 2026-09-14、schoolId 为 null，所以看到的是国家方案。
+- 01 周视图；02 学期设置里的新入口（在「添加调休 / 停课」上方）；03/04 套用页：标题「国家法定节假日（2026）」、来源、查看来源、提示语，
+  9/20、10/10 两条为 info 图标 + 「国家调休上班…」无勾选框，其余 10 条默认勾选，「套用 10 条」；取消 / 重新勾 10/7 → 9 / 10 条；
+  05 套用后返回学期设置 +「已套用 10 条调休 / 停课」；06 列表里 10 条新设置 + 原 9/23 停课；07 再次进入：10 条都是「已设置」禁用、「套用 0 条」禁用；
+  08 桌面小组件今天（10/6）显示「今天停课，好好休息 ✨ / 国庆节放假（国家安排）」；09 翻到 10/7 显示「这天停课 / 国庆节放假（国家安排）」。
+
+### 没验证 / 遗留
+- 上大学校方案（schoolId = shu）只在单测 / widget 测试里验证，没在模拟器上看（要先真实导入上大课表才有 schoolId；本机连不上教务）。
+- 「查看来源」没点（会拉起系统浏览器访问外网）。冲突行、warning 行在真机上的样子没看，只有 widget 测试。
+- 没有停课备注的停课日（例如 9/23）小组件只显示一行「这天停课」——逻辑上如此，没单独截图。
+- 套用页里需要确认的行（ListTile + leading 图标）与勾选行（CheckboxListTile）标题左边距不完全对齐，属于观感小问题，没调。
+- 数据只有 2026 国家安排和上大 2026 秋；2027 国家安排（含 2027 元旦、春节）发布后要补进 `holidays.json`。没有远程更新。
+- 学校路径下 `actAsWeek` < 1 的条目会被存下来，但 `DateOverride.fromJson` 会把 <1 的周丢掉（重新加载后退化为「这一天本身所在的周」）；界面已用 warning 提醒检查开学日期。
+
+## v1.4.0 (2026-10-07)
+
+依据 `PLAN-1.4.md`（REVIEW-3-market 第六节前 7 条）。同一工作树串行 A → F（G 只读审查，之后修复轮 + 最终打包）。
+每个任务一节，统一分为「实现 / 测试 / 模拟器 / 和 PLAN 的偏差 / 没验证 / 遗留」（F 多一个「打包」）；交接单在 `.tmpbuild/plan14/handoff-<字母>.md`。
+任务 F 整理格式时没有删改 A–E 记录的事实，只把小标题统一成 `####`，并在 F 已处理的遗留项后面加「（F：…）」。
+
+| 任务 | 内容 | `flutter test` | 模拟器上装的 release 通用包 |
+|---|---|---|---|
+| A | 更新源一处配置 + Gitee 镜像 + 假日表远程下发 | 411 → 458 | 没打包 |
+| B | 本地课前提醒 | 458 → 513 | versionCode 8，sha256 前缀 acb95220 |
+| C | 小组件自动切明天 + 状态头部 + 2×1 | 513 → 519（另有 Kotlin JVM 单测 20） | 56.2MB，18958a636913d10b |
+| D | ICS 导出 | 519 → 543 | 59,062,475 B，13143932963b35a3 |
+| E | 周视图长按列头设调休 + 空状态三入口 | 543 → 573 | 59,078,951 B，d290bdb4de2069ad（第二次） |
+| F | 版本 1.4.0+9、文档、打包、模拟器升级验证 | 573（无新增） | 59,078,951 B，db6adb891f572ccb，**versionCode 9** |
+
+修复轮已定的待修项（`.tmpbuild/plan14/fixlist-pre-G.md`，和 G 的发现合并后一起修）：① A 刷新失败也记刷新时间 → 只在 updated / unchanged 时记；
+② C 自动看明天后 4×2 翻不回今天；③ E 普通周六也写「…（周一）复课」；④ B 折叠的通知组点开不切「今日」；⑤ D `BackupService` 仍有自己的分享代码。
+
+### A：更新源一处配置 + Gitee 镜像 + 假日表远程下发（opus55）
+
+#### 实现
+**仓库配置收口（A1）**
+- 新文件 `lib/core/repo_config.dart`：`RepoConfig{githubOwner, githubRepo, giteeOwner='', giteeRepo='', branch='main'}`，
+  `isPlaceholder`（OWNER / REPO / 空串）、`isConfigured`、`hasGitee`、`issuesUrl`、`rawUrls(path)`（Gitee raw `gitee.com/{o}/{r}/raw/{branch}/{path}`
+  → jsDelivr `cdn.jsdelivr.net/gh/{o}/{r}@{branch}/{path}` → `raw.githubusercontent.com/{o}/{r}/{branch}/{path}`，纯函数，开头的 `/` 去掉）。
+  `const kRepo = RepoConfig(githubOwner: 'OWNER', githubRepo: 'REPO')` —— **发布前只改这一行**。`lib/` 里 `OWNER` / `REPO` 只剩这个文件（有测试扫描）。
+- `UpdateConfig.sources` 改成 getter：`kRepo.rawUrls('latest.json')`（占位状态下仍是 2 个地址：jsDelivr、raw；**顺序和 1.3 相反**，raw 放最后）；
+  `isConfigured = kRepo.isConfigured && sourcesConfigured(sources)`；`placeholder = RepoConfig.placeholderSlug`。
+  `UpdateChecker` 记住是否用的默认源：默认源看 `kRepo`，注入的源仍按字符串里有没有 `OWNER/REPO` 判断（老测试的注入方式不变）。
+- `FeedbackLinks.issuesUrl` / `isConfigured` 改成从 `kRepo` 派生的 getter（`email` 仍是空串常量）。
+- `latest.json` 协议不变（versionCode / versionName / changelog / downloadUrls / sha256），只多认一个可选的 `"holidays": {"sha256"}`
+  → `UpdateInfo.holidaysSha256`；`UpdateInfo.parseSha256` 抽成静态方法。没有改用 GitHub Releases API。「检查更新」仍然只提示、不阻断。
+- `UpdateChecker.httpFetch(uri, timeout, {int maxBytes = 64 KiB})`：上限变参数，超限文案改成「响应超过 N KiB」，https 报错改成「只允许 https 地址」。
+  带可选命名参数的静态方法仍可当 `UpdateFetch` 注入。
+
+**假日表远程下发（A2）**
+- `assets/holidays.json` 顶层加 `"updatedAt": "2026-10-06"`（文件保持 UTF-8 / LF / 无 BOM，有测试）。
+- `HolidayPresets` 新字段 `version`（没写为 0）、`updatedAt`（DateTime?，只有日期）、`source`（新枚举 `HolidayDataSource.bundled / remote`），
+  `isValid`（version == 1）、`updatedAtText`、`schemaVersion = 1`；`fromJson(json, {source})`：顶层 version 写了但 ≠ 1 → 返回不含条目的无效数据；
+  **没写 version 仍按当前结构读**（老的容错测试用的手写 JSON 都没写 version）。远程 / 缓存走 `HolidayPresets.tryParseStrict`：必须是对象、version 恰好 1、updatedAt 合法，否则 null。
+- 新文件 `lib/core/holiday_repository.dart`：
+  - `HolidayRepository({UpdateFetch? fetch, RepoConfig repo = kRepo, FutureOr<Directory> Function()? dirProvider, Future<HolidayPresets> Function()? loadBundled, Duration timeout = 5 s, int maxBytes = 256 KiB})`；
+    默认 fetch = `UpdateChecker.httpFetch(..., maxBytes: 256 KiB)`，默认目录 = 新增的 `Storage.dataDirectory()`（尊重 `overrideDirectory`）。
+  - `load()`：内置（`HolidayPresets.loadBundled`，静态缓存不动）vs 缓存 `holidays.remote.json`；缓存能严格解析且 `updatedAt` 晚于内置才**整体**用缓存。坏缓存 / 旧缓存 / 读失败一律回退内置，不抛。
+  - `refresh({force, required privacyAccepted, now, lastRefresh, onAttempt, manifest})` → `HolidayRefreshResult{status, presets, source, errors}`，
+    `HolidayRefreshStatus.notConfigured / skipped / throttled / updated / unchanged / failed`。顺序：kRepo 占位 → notConfigured；未同意 → skipped；
+    非 force 且距 `lastRefresh` 不满 24 小时（`shouldRefresh`，比的是两个时刻的真实间隔；上次时间在未来也放行）→ throttled；
+    否则先 `onAttempt(now)`（失败也算刷新过，和检查更新一致），再按 `rawUrls('shu_schedule/assets/holidays.json')` 依次下载：
+    UTF-8 字节 ≤ maxBytes → （有校验值时）SHA-256 一致 → `tryParseStrict` → 比当前 `load()` 新就 `Storage.writeAtomic` 写缓存 → updated，否则 unchanged（第一个合法来源为准）；全失败 → failed。
+  - SHA-256：`manifest` 由调用方传入（自动检查更新后顺带刷新时就是那份 `latest.json`）；没传就自己按 `rawUrls('latest.json')` 读一次，读不到 / 没写就只靠 TLS。不一致的来源算失败、继续试下一个。
+  - `refreshFor(AppState, {force, now, manifest})`：`privacyAccepted = privacyAcceptedVersion >= PrivacyPolicy.version`（要求同意 v2）、`lastRefresh/onAttempt` 接 `AppSettings.lastHolidayRefresh`。
+- `Storage.writeAtomic(File, String)`（`_writeAtomic` 的公开版，失败时删临时文件；不走课表 / 设置的写队列）。
+- `AppSettings.lastHolidayRefresh`（默认 null，toJson / fromJson / copyWith，不升 settingsVersion）；`AppState.setLastHolidayRefresh`；`restoreFrom` 保留设备上的值（同 `lastUpdateCheck`）。
+- `HolidayApplyPage({presets, repository})`：头部 `holiday-data-version`「假日表 · 内置 2026-10-06」/「假日表 · 已更新 …」（列表页和空状态都有）；
+  AppBar `holiday-refresh`（刷新时转圈禁用）→ `refreshFor(force: true)`，SnackBar：更新源未配置 / 同意隐私说明后才能联网更新假日表 / 假日表已更新（日期）/ 假日表已是最新 / 假日表更新失败：原因；
+  updated 后重新 `load()`。进入页面：没注入 presets → `load()` 后静默非 force 刷新，updated 才重新读取；**只注入 presets 不注入 repository 时不做静默刷新**（老测试不碰网络、磁盘）。
+  页面文案函数 `holidayDataVersionText` / `describeHolidayRefresh` 是顶层公开函数。
+- `runAutoUpdateCheck(..., {HolidayRepository? holidays})`：检查结果是 available / upToDate 时，用这份 `latest.json` 做 manifest 调 `refreshHolidaysQuietly`（新的顶层函数，吞异常），和更新对话框并行，函数返回前等它结束；failed / notConfigured 不刷新。`HomeShell` 加可注入的 `holidayRepository`。
+- 发版脚本 `shu_schedule/tool/gen_latest.py`（标准库）：版本默认读 pubspec，`--apk` 可重复（第一个的 SHA-256 进顶层 `sha256`，全部进 `apks`），
+  `holidays{sha256, updatedAt, bytes}`（校验 version == 1、有 updatedAt、无 BOM、≤256 KiB，CRLF 警告），`downloadUrls` 默认从 repo_config.dart 的 kRepo 拼 Release 页（Gitee 在前），
+  `--refresh-holidays` 只重算 holidays 一段；输出超过 64 KiB 拒绝。用 scratchpad 里的假 APK 跑过：sha256 与 `sha256sum` 一致，缺 APK 退出码 1。用法写在根 README「十一、发布（维护者）」。
+
+**隐私与文案（A3）**
+- `PrivacyPolicy.version` 1 → **2**，`updatedAt` → 2026-10-07（老用户升级后会再看到一次同意框，有测试）。
+- `privacy.md`：检查更新改为 Gitee → jsDelivr → GitHub；新增第 3 种联网「更新节假日表」（触发时机、只有日期、校验、缓存文件名）；原「学校清单不会联网下载」一句改写为学校清单仍内置、假日表只从配置的仓库镜像下载并缓存；
+  INTERNET 用途、Dart 标准库发请求、存储位置补上假日表；第三方组件加 `crypto`；更新记录加第 2 版。
+- 同步：隐私确认框（privacy_page.dart）、设置页「隐私说明」副标题「不收集、不上传；只在导入课表、检查更新和更新假日表时联网」、关于页（多一句联网说明、常见问题里的放假 / 调休指向「套用节假日安排」）、根 README「七、隐私」。
+- `pubspec.yaml` 加 `crypto: ^3.0.7`（pub.dev 当天最新 3.0.7，原来就是 uuid 带进来的同一版本，lock 里只是 transitive → direct main）。
+
+#### 测试
+411 → **458**（+47）。`repo_config_test.dart` 6（Gitee 3 源在前 / 不配 2 源 / 占位判断 / FeedbackLinks 派生 / lib 里占位符只在一处）；
+`holiday_repository_test.dart` 25（内置 version / updatedAt、严格解析、load 的内置回退 / 新缓存整体替换 / 旧或同日缓存忽略 / 5 种坏缓存、refresh 的 notConfigured / skipped / throttled+force / shouldRefresh、updated（写缓存、无残留 .tmp、onAttempt）、Gitee 顺序、unchanged、和缓存比、failed（坏 JSON / version 2 / 超限 / 超时）、SHA-256 不一致拒绝并试下一个、自己读 latest.json、gen_latest 口径、lastHolidayRefresh 往返 / 恢复备份保留、dataDirectory、refreshFor 要求 v2 且写回时间后节流）；
+`holiday_refresh_wiring_test.dart` 7（同意后顺带刷新且带 manifest、检查失败不刷新、刷新抛异常不影响启动、v1 用户重新确认、privacy.md v2 内容、设置页副标题、isUpdated）；
+`holiday_apply_page_test.dart` +7（刷新按钮 + 未配置提示、fake 仓库头部日期 + 静默刷新一次、静默 updated 自动重读、手动 updated / failed / unchanged 提示、空状态、文案函数）；
+`update_checker_test.dart` 改写「配置」组（源从 kRepo 派生、jsDelivr 在前 raw 在后、仍未配置）+2（holidays.sha256 解析、Gitee 3 源）。`privacy_and_about_test.dart` 的「未配置更新源 → 禁用」原样通过。
+
+#### 模拟器
+- 本任务没打包、没上模拟器（按 PLAN 留给 F）。（F：假日页数据版本与刷新按钮已在 1.4.0 正式包上截图 F-11 / F-12；隐私 v2 重新确认的截图是 B-1。）
+
+#### 和 PLAN 的偏差
+1. `dirProvider` 类型是 `FutureOr<Directory> Function()?`（PLAN 写的是同步 `Directory Function()?`），因为默认值 `Storage.dataDirectory()` 是异步的；同步的闭包照样能传。
+2. `refresh` 比 PLAN 多了 `lastRefresh` / `onAttempt` / `manifest` 三个可选参数（仓库本身不持有 AppState），另加 `refreshFor(AppState)` 做接线；构造函数多了 `loadBundled` / `timeout` / `maxBytes`。
+3. 「没写顶层 version」的数据 `fromJson` 仍照读（只有写了且 ≠ 1 才无效），严格的「必须 = 1」放在 `tryParseStrict`（远程 / 缓存）。
+4. 「成功后」理解为检查更新读到了合法 `latest.json`（available / upToDate）。
+5. 根 README 没有现成的「发布」一节，新建了「十一、发布（维护者）」；另外顺手改了「七、隐私」里已不准确的联网描述（没碰「给朋友装」）。
+
+#### 没验证 / 遗留
+- 没有真实联网：kRepo 仍是占位符，Gitee / jsDelivr / GitHub 的真实下载、jsDelivr 缓存时长、Gitee raw 对 UA 的要求都没测（codemap 记录过本机访问 Gitee 时好时坏）。
+- 本任务不打包、没上模拟器（按 PLAN，留给 F）：隐私 v2 重新确认、假日页的数据版本与刷新按钮只在 widget 测试里看过。（F：假日页已在模拟器上看过，见 F-11 / F-12。）
+- 刷新失败也会记下刷新时间，24 小时内只能靠页面上的刷新按钮重试（和检查更新「失败也算查过」一致）。（待修清单 ①。）
+- 改了 `holidays.json` 却没重新生成 `latest.json` 时，带校验值的客户端会一直拒绝新数据——README 已写明要一起提交。
+
+### B：本地课前提醒（opus55）
+
+#### 实现
+**依赖与 Android（B1）**
+- pub.dev 当天核对：`flutter_local_notifications` 最新稳定 **22.3.1**（2026-09-13；23.0.0-dev.1..3 是预发布）、`timezone` **0.11.1**（2026-06-29）。pubspec 加 `flutter_local_notifications: ^22.3.1`、`timezone: ^0.11.1`；lock 只新增插件家族（linux 8.0.1 / platform_interface 12.2.0 / web 1.0.0 / windows 3.1.1）和 timezone，http 1.6.0 原本就有。**没加** `flutter_timezone`。
+- API 以 pub cache 里 22.3.1 的源码为准（README 的 `show(0, …)` 位置参数示例过时）：`initialize({required settings, onDidReceiveNotificationResponse})`、`zonedSchedule({id, scheduledDate, notificationDetails, androidScheduleMode, title, body, payload})`、`show({id, …})`、`cancelAllPendingNotifications()`、`pendingNotificationRequests()`、`getNotificationAppLaunchDetails()`；Android 端 `requestNotificationsPermission / areNotificationsEnabled / requestExactAlarmsPermission / canScheduleExactNotifications / openAppNotificationSettings / createNotificationChannel`。原生端：精确模式在没权限时抛 `exact_alarms_not_permitted`（所以必须自己选 inexact）；API < 31 时 `canScheduleExactNotifications` 恒 true。
+- `build.gradle.kts`：`isCoreLibraryDesugaringEnabled = true` + `dependencies { coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4") }`（文件保持 CRLF）。**AGP 9.1 / Gradle 9.3.1 / `android.newDsl=false` 下直接编过，没改任何构建配置**（首次 2m52s，增量 40–60s）。
+- Manifest：`POST_NOTIFICATIONS`、`SCHEDULE_EXACT_ALARM`、`RECEIVE_BOOT_COMPLETED`、`VIBRATE`；`ScheduledNotificationReceiver` + `ScheduledNotificationBootReceiver`（BOOT_COMPLETED / MY_PACKAGE_REPLACED / 两个 QUICKBOOT_POWERON），按插件 README。不用 `USE_EXACT_ALARM`。
+- `res/drawable/ic_stat_notify.xml`（快捷方式那张日历，纯白 `#FFFFFFFF`）+ `res/raw/keep.xml`（`tools:keep="@drawable/ic_stat_notify"`）。`aapt2 dump resources` 确认 release 包里有 `drawable/ic_stat_notify`（0x7f070088），模拟器上通知的 icon id 就是它。
+- 渠道 `class_reminder`「上课提醒」IMPORTANCE_HIGH、`evening_preview`「明日预告」IMPORTANCE_DEFAULT（`ReminderChannels`，id 发布后不能改）。
+
+**规划器（B2，`lib/core/reminders/reminder_planner.dart`，纯 Dart）**
+- `ReminderSettings`（放在 `lib/models/reminder_settings.dart`，由 planner 和 app_settings 再导出；不可变，`leadChoices = [5,10,15,20,30]`，fromJson 容错：不在可选值里的分钟 / 越界时刻回默认）→ `AppSettings.reminders`（默认关闭，旧存档 → 默认，不升 settingsVersion）；`AppState.setReminderSettings`；**恢复备份时跟着备份走**（旧备份没有 → 关闭）。
+- `ReminderPlanner.plan({timetable, settings, now, horizonDays = 10})`：今天起 10 天，`effectiveDayOf` + `coursesOnEffective`（调休 / 停课已展开），实际周不在 `[1,totalWeeks]` 的不提醒（同 WidgetSync 的守卫）；`fireAt = DateTime(y,m,d,h,min − lead)`，`<= now` 跳过；按 fireAt、id 排序。**不看 `enabled`**（服务层判断；设置页也用它）。
+- 文案：标题「{课名} · HH:mm 上课」，正文用「 · 」连接「地点 · 老师 · 第 s-e 节」（空的省略，单节写「第 5 节」），调休日加「（调休：按第 N 周周X上课）」。预告（每天 previewHour:previewMinute 说明天）：停课「明天停课（备注）」、调休「明天按第 N 周周X上课，共 k 节，HH:mm 开始」、普通「明天 k 节课，HH:mm 课名」，正文是「x月x日 周X · 课程列表（最多 4 门）」。
+- id：FNV-1a 32 位，输入 `kind|yyyy-MM-dd|courseId|startPeriod`（预告 `preview|明天||0`），取低 31 位；测试里和 Python 独立实现对过数。测试通知固定 9001 / 9002。
+- `cancelledDays(...)`：停课**且原本有课**的日子（设置页「x月x日 停课 · 不提醒」）。
+
+**网关与服务（B3）**
+- `ReminderGateway`（init / requestNotificationPermission / permissions / requestExactAlarm / openSettings / scheduleAll(list, exact) / cancelAll / showTest / scheduleTestIn / pending / launchPayload），约定实现不抛异常。`LocalNotificationsGateway`：`tz.TZDateTime.from(本地时间, tz.UTC)`（Location 名 `Etc/UTC`），`exactAllowWhileIdle` / `inexactAllowWhileIdle`，精确失败时这条及后续自动降级；`scheduleAll` 先 `cancelAllPendingNotifications()` 再整批排，并补回还没触发的「1 分钟后测试」。**`flutter test` 里 `FlutterLocalNotificationsPlatform.instance` 是没初始化的 `late`，`resolvePlatformSpecificImplementation` 会抛 LateInitializationError**，所以 `_android` 包了 try/catch → null → 全部空操作（有测试）。
+- `ReminderService`（ChangeNotifier）：`replan` 800 ms 防抖；`replanNow` 串行；只有 `enabled && privacyAcceptedVersion >= PrivacyPolicy.version` 才排，否则 `cancelAll`（重复关闭不重复撤）；`init()` 之前只算不排；计划 + 精确与否的签名不变就不重排；暴露 `lastPlan`、`permissions`、`active`。
+- 接线：`ShuScheduleApp(reminderGateway:)`，Provider 提供 `ReminderService`；`WidgetsBindingObserver.resumed` → `_scheduleWidgetPush()` + 刷新权限 + `replanNow`；AppState 监听同时触发小组件推送和 `replan`。`HomeShell._startupFlow` 在隐私同意后 `_startReminders`：设 `onTap → _handleAction('today')`、`init()`、`launchPayload()` 非 null → 今日、再 `replanNow`。Provider 里没有服务（只 pump HomeShell 的旧测试）时跳过。
+
+**设置页（B4）**：设置页新分组「上课提醒」（`settings-reminders`，「已开启 · 提前 15 分钟」/「未开启」）→ `ReminderSettingsPage`：`reminder-enabled`（先申请通知权限，拒绝则不保存、SnackBar `reminder-denied` 带「去设置」）、`reminder-lead-<n>`、`reminder-preview` / `reminder-preview-time`（TimePicker）、权限卡（`reminder-perm-notifications` + `reminder-open-settings`，`reminder-perm-exact` + `reminder-request-exact`，`reminder-exact-note` 写 Android 14 默认关闭、未允许时「提醒可能晚几分钟」）、`reminder-test-now` / `reminder-test-later`、「即将触发」按触发日期分组（`reminder-day-<date>` / `reminder-item-<id>` / `reminder-cancelled-<date>` / `reminder-upcoming-empty` / 关闭时 `reminder-upcoming-off`）和「共 N 条，系统里已安排 M 条」（`reminder-pending-count`）。页面改设置后直接 `replanNow`，不等防抖；回到前台时自己也刷新权限。
+- 隐私：`privacy.md`「二」加「上课提醒在本机生成……**提醒完全在本机生成，不联网**」；「三、权限清单」改为 App 自己申请 INTERNET / POST_NOTIFICATIONS / SCHEDULE_EXACT_ALARM / VIBRATE / RECEIVE_BOOT_COMPLETED（删掉「只申请了一个权限」，androidx.work 合并的剩三个）；第三方组件加 `flutter_local_notifications`、`timezone`；存储位置补「已安排的提醒由通知组件存在 App 私有存储」；第 2 版更新记录补上提醒。`PrivacyPolicy.version` 没动（仍是 A 改的 2）。同意框（privacy_page.dart）加一条「「上课提醒」默认关闭，打开时才申请通知权限；提醒在本机生成，不联网。」
+
+#### 测试
+458 → **513**（+55）：`reminder_planner_test` 19、`reminder_service_test` 11（含 AppSettings 往返 / 落盘 / 恢复备份）、`reminder_settings_page_test` 14、`reminder_wiring_test` 5（ShuScheduleApp + Fake：同意前不 init、冷启动 payload → 今日、运行中点通知 → 今日、resume 后按精确重排、AppState 变化 800 ms 防抖）、`reminder_android_config_test` 6（pubspec / desugaring / manifest / 图标白色 + keep / 渠道 / privacy.md 覆盖 manifest 全部权限）。`flutter analyze` 零问题，`dart format` 0 changed。
+
+#### 模拟器
+- 环境：emulator-5554，API 35，release 通用包 versionCode 8 覆盖安装，截图 `shots/v140/B-*.png`。
+- 隐私 v2 重新确认（新条目可见）→ 示例课表第 4 周（10/5–10/7 国庆停课，周四 / 五有课）→ 设置「上课提醒 · 未开启」→ 开启：logcat `[reminders] 已安排 28/28 条（exact=false）`；精确闹钟默认「未允许」（Android 14+ 预期）。
+- 「1 分钟后测试」11:40:57 → alarm `origWhen=2026-10-07 11:41:58 window=+44s952ms` → 11:42:46 送达：`id=9002 importance=4 channel=class_reminder category=reminder`，`android.title=测试提醒（定时）`；`dumpsys alarm | grep -c cn.shu.schedule` = 86 / 89 / 97（行数，含统计行），其中 `Alarm{…cn.shu.schedule}` 条目 29（28 + 测试）→ 送达后 28。
+- 「即将触发」：「10月7日 停课 · 不提醒」、10-07 21:00 预告「明天 3 节课，08:00 大学英语…」、10-08 07:45 / 09:45 / 12:45 …，底部「共 28 条，系统里已安排 28 条」。
+- 点通知（单条）→ 切到「今日」；`am kill` 杀进程后定时测试仍在 11:48:15 送达（receiver 拉起新进程），点它冷启动（`act=SELECT_NOTIFICATION`）→ 落在「今日」；冷启动后重排 28 条。「去授权」打开系统「Alarms & reminders」页（没拨开关，按返回回到 App）。
+
+#### 和 PLAN 的偏差
+1. `ReminderSettings` 放在 `lib/models/`（models 不反向依赖 core），由 planner 再导出。
+2. 停课预告 / 停课行只在「原本有课」的日子出现（长假里本来没课的周末不打扰）。
+3. 单节写「第 5 节」而不是「第 5-5 节」；正文各段统一用「 · 」连接。
+4. 预告按「触发日在 10 天窗口内」生成（最后一条说的是第 11 天）。
+5. 服务按「计划 + 精确与否」签名去重；设置页改动直接 `replanNow`。
+6. 同意框多一条提醒说明（隐私说明的摘要，不改版本号）。
+
+#### 没验证 / 遗留
+- 精确闹钟授权后的「按精确重排」只在 widget 测试里验证（模拟器上没拨系统开关）；开机后插件 boot receiver 补排没测（不能重启共享模拟器）。
+- 系统把同一 App 的 2 条以上通知自动归组后，点**折叠的组摘要**只会用 LAUNCHER intent 打开 App（不带 payload，不切「今日」）；单条点击和冷启动都正常。要彻底解决得给通知设 groupKey + 自己的摘要。（待修清单 ④。）
+- 运行中点通知只切 tab，不会关掉已经推上去的子页面（和快捷方式 `today` 现有行为一致）。
+- 10 天窗口只在打开 / 回到 App 时往前滚；10 天不开 App 之后就没有提醒了（codemap 风险 3，没有后台 Dart 任务）。OEM 杀后台（MIUI / EMUI）没法在模拟器上验证。
+- 模拟器上提醒保持开启状态（28 条闹钟），后续任务看到「简课表」通知属正常。
+
+### C：小组件自动切到明天 + 状态头部 + 2×1「下一节」（opus55）
+
+#### 实现
+**共享解析（ShuWidgetProvider.kt 下半段，纯函数）**
+- `resolveDisplay(snapshot, now, offset): DisplayDay(dayIndex, daysFromToday, autoTomorrow, isHome)`，`DayWidgetProvider.render` 和 `DayRemoteViewsFactory.onDataSetChanged` 都只调它（原来两处各自 `todayIndex + offset`）。默认那天 = 今天；`isDayOver`（今天有课且最后一节 `endMinutes <= now`，或今天没课 / 停课且 `now >= 18:00`）且快照里有明天 → 明天（`autoTomorrow`）。快照只到今天时继续显示今天。
+- **偏移语义改成「距今天的天数」**：0 = 跟着默认那天走，k ≥ 1 = 固定看今天 + k。`nextPageOffset` 从「当前看到的那天」± 1，结果不晚于默认那天就存 0。所以自动看明天时 ▶ 直接到后天（不会出现 offset 0 / 1 都是明天的重复页），◀ 不会退回上完课的今天；白天翻到某天、下课后自动切换时，翻到的那天也不跳。`isHome` 控制 ◀ 调灰和「回到今天」按钮；默认那天是明天时按钮文案是「回到明天」（新 string `widget_back_to_tomorrow`）。
+- `relativeDayLabel(days)` 按实际日期差：`epochDayOf("yyyy-MM-dd")`（Hinnant `days_from_civil` 纯整数，不用 Calendar 相减，避开夏令时），快照中间缺天时也说对「后天」。`todayKey` 改用 `Locale.ROOT`。
+- 列表高亮：今天 = 第一节 `endMinutes > now`（原来是 `>=`，下课那一分钟还高亮，和头部不一致）；自动看明天 = 明天第一节。
+
+**状态头部（WidgetStatus.kt `dayHeaderSub`，单行）**：今天 →「第 N 周 · 上课中 · 至 11:50」/「第 N 周 · 51 分钟后上课」（≤ 90 分钟，含 90）/「第 N 周 · 下一节 10:00」/ 今天没有后续的课「第 N 周 · 今天」；自动看明天 →「明天 · 第 N 周 · 3 节课」（`courses.size`，和 B 的「明天 k 节课」同口径；0 门是「没有课」）；停课日、翻到的其他日子沿用原来的「第 N 周 · 今天 / 明天 / 后天 / N 天后」，`week = null` 仍是「假期」。停课空态文案不变（`isToday` 由日期差判断，不再看 offset）。
+
+**边界刷新**：`ShuWidgetProvider.scheduleBoundaryRefresh` = `AlarmManager.set(RTC, t, PendingIntent)`，新广播 `ACTION_BOUNDARY_REFRESH`（基类和 DAILY_REFRESH 一样补全 appWidgetIds），每次 `onUpdate` 渲染完重排（同一 PendingIntent 再 set 即替换），`onDisabled` 取消。`nextBoundaryMillis` 取严格晚于现在的最早一个：今天每节课开始 / 结束、**每节开始前 90 分钟**、**倒计时期间 now + 10 分钟**、18:00、次日 00:00:30（Calendar 设字段，夏令时日也是当地钟点）。request code：4×2 每日 0x5149 / 边界 0x514A，2×1 每日 0x514B / 边界 0x514C。不申请精确闹钟（B 的 `SCHEDULE_EXACT_ALARM` 只给提醒用）。官方文档（developer.android.com AlarmManager，当天抓取）：API 19 起 `set` 的时间「不会提前、但可能推迟」以便批量投递；`RTC`「does not wake the device up… not delivered until the next time the device wakes up」。模拟器实测 `set` 的窗口 ≈ 0.75 × 距触发时长、上限 1 小时（见下）。
+
+**2×1「下一节」**：`NextWidgetProvider.kt`（读同一份快照，`findNextClass`：今天第一节 `endMinutes > now` → 上课中 / 下一节；没有就明天第一节；都没有 null）+ `res/layout/widget_next.xml`（色条 + 课程名 14sp 粗 / 时间 12sp / 地点 11sp，单行省略，无列表）+ `widget_next_preview.xml`（选择器 previewLayout）+ `drawable-nodpi/widget_next_preview.png`（420×176，PIL + 微软雅黑画的，配色取自 4×2 的预览图）+ `res/xml/next_widget_info.xml`（minWidth 110dp、minHeight 40dp、minResize 同值、targetCell 2×1、`resizeMode="horizontal|vertical"`、30 分钟周期）+ manifest receiver（label `@string/widget_next_label`「下一节课」）。第二行：「上课中 · 至 11:40」/「10:00-11:40」/「明天 · 08:00-09:40」；空态「近期没有课程」/ 快照缺今天「打开 App 刷新课表」。`MainActivity.requestPinWidget` 没动（仍钉 4×2），`shu_schedule/README.md` 新增「桌面小组件」一节说明 2×1 从桌面小组件列表添加。
+
+**Dart 侧**：`WidgetSync.refreshTargets = [day, next]`（新增 `nextProviderName` / `nextProviderQualified`），快照 schema 不变（v2，Kotlin 用已有的 `start` / `end`）。B 加的 `didChangeAppLifecycleState(resumed) → _scheduleWidgetPush()` 已确认在 `app.dart`，没重复加。顺手改了过时注释：Kotlin 里「上大课表」「今天起 14 天」「v1.2.0 起唯一一个」、app.dart「重算 14 天快照」、manifest / day_widget_info / strings 的「只有这一个小组件」。
+
+#### 测试
+Flutter 513 → **519**（`widget_sync_test` 的 refreshTargets 用例改成两个 Provider；新增 `test/widgets/widget_android_config_test.dart` 6 个：refreshTargets ↔ Kotlin 类 ↔ manifest receiver ↔ provider xml、2×1 尺寸 / 布局 id / 预览 / 文案、MainActivity 仍只钉 4×2、request code 互不相同且没有 `setExact*` / `setAlarmClock` / `*_WAKEUP`、Kotlin 里没有「上大课表」「14 天」、README 说明）。**Kotlin JVM 单测 20 个**（`android/app/src/test/kotlin/cn/shu/schedule/widgets/WidgetTimeLogicTest.kt`，`build.gradle.kts` 加 `testImplementation("junit:junit:4.13.2")`，gradle 缓存里已有）：自动切明天的四种触发 / 不触发、快照只到今天、偏移语义、日期差、头部全部文案（含 90 / 91 分钟边界、11:50 下课那一分钟）、2×1 内容、重绘时刻（含每小时每半点「严格在未来、≤ 24h」扫一遍、America/Denver 两个夏令时切换日）、`epochDayOf` 对 `java.time`。**AGP 9 只给 debug 建单测任务**：命令是 `cd android && ./gradlew :app:testDebugUnitTest`（`testReleaseUnitTest` 不存在）。`flutter analyze` 零问题，`dart format` 0 changed。
+
+#### 模拟器
+- 环境：emulator-5554，API 35，release 通用包 `flutter build apk --release` 一次，56.2MB，sha256 前 16 位 18958a636913d10b，versionCode 8，`adb install -r` → Success；截图 `shots/v140/C-1 … C-11`。
+- 桌面原本就有一个 4×2（id=9）。装包后 `am start` → 4×2 仍是停课文案「第 4 周 · 今天」+「今天停课，好好休息 ✨ / 国庆节放假（国家安排）」（C-1）。App 内「设置 → 添加桌面小组件」弹出的系统确认框仍是 4×2「简课表」（C-4，点了取消，桌面已有一个）。
+- 2×1 走启动器：长按桌面 → Widgets → 「简课表 · 2 widgets」展开可见「下一节课 2×1 / 正在上或接下来的一节课：课程名、时间、地点。」（previewLayout，C-2）→ `input draganddrop` 拖到桌面 → `dumpsys appwidget`：`[1] id=12 provider=…NextWidgetProvider`，provider 信息 `min=(28161x10241)`（= 110dp × 40dp）`resizeMode=3 updatePeriodMillis=1800000`。今天停课 → 2×1 显示明天第一节「大学英语综合课程… / 明天 · 08:00-08:45 / 东区 J-101」（C-3）。
+- 「上课中」：午休时段（11:40–13:00）没有哪一节包含当前时间，所以**没加临时课**——示例课表周三本来有 13:00-14:40「数据结构」，只临时删了 10/7 的国庆停课（学期设置里删一条）。12:19 4×2 =「第 4 周 · 42 分钟后上课」、数据结构高亮，2×1 =「数据结构 / 13:00-14:40」（C-5）。之后**没再碰 App**（前台一直是启动器），边界闹钟链：`12:28 → 12:42 → 12:52 → 13:00 → 13:30`（`.tmpbuild/plan14/C-alarm-chain.log`），12:32 截图已是「28 分钟后上课」（C-6），13:04 截图两个小组件都是「上课中 · 至 14:40」（C-7）。
+- `dumpsys alarm` 原文：`RTC #13: Alarm{c91e32c type 1 origWhen 1791379800000 … cn.shu.schedule}` / `tag=*alarm*:cn.shu.schedule.action.BOUNDARY_REFRESH` / `type=RTC origWhen=2026-10-07 13:30:00.000 window=+19m32s619ms repeatInterval=0 count=0 flags=0x0`（两条，4×2 和 2×1 各一）；2×1 `onEnabled` 的 `DAILY_REFRESH type=RTC origWhen=2026-10-08 00:00:30.000 repeatInterval=86400000`；统计行 `*alarm*:cn.shu.schedule.action.BOUNDARY_REFRESH … 0 wakes 8 alarms`。`type 1` = RTC、`*alarm*` 而非提醒的 `*walarm*`、`flags=0x0`（没有 FLAG_STANDALONE / ALLOW_WHILE_IDLE）= 非精确、不唤醒。窗口实测：距触发 10 分钟 → `+7m`，40 分钟 → `+30m`，5 小时 → `+1h0m0s0ms`（封顶 1 小时）。
+- 翻页（非自动）：▶ → 「10月8日 周四 / 第 4 周 · 明天」+「回到今天」、◀ 变亮、无高亮（C-8）→ 回到今天。
+- **自动看明天（实机）**：13:06 临时给 10/7 加调休「按周一的课上」（第 4 周周一 08:00-11:40 两门，13:06 已全部下课）→ 4×2「10月8日 周四 / 明天 · 第 4 周 · 3 节课」、明天第一节高亮、◀ 灰、无「回到」按钮；2×1「明天 · 08:00-08:45」（C-9）。此时 ▶ → 「10月9日 周五 / 第 4 周 · 后天」+「回到明天」（C-10，没有重复页）→ ◀ 回到默认的明天。
+- 恢复：删掉临时调休 → 「套用节假日安排」显示「套用 1 条」（只有 10/7，其余「已设置」）→ 套用 → 列表里 10/7 回到「停课 · 国庆节放假（国家安排）」；桌面回到 C-1 的样子 + 2×1 明天第一节（C-11）。`grep -cE 'Alarm\{.*cn\.shu\.schedule'` = 31 = 28 条提醒 + 3 条小组件闹钟。副作用：10/7 停课被临时取消期间，B 的提醒按计划在 12:45 发了一条「数据结构」上课提醒（通知栏里那个日历图标），属预期。
+- 没 `am force-stop`、没改系统时间。注意 4×2 的 `DAILY_REFRESH`（0x5149）在 C 之前就已不在 `dumpsys alarm` 里（只在 `onEnabled` 注册，之前某次 force-stop / 重装丢了）；现在每次渲染都会重排的边界闹钟里含 00:00:30，链条自续，不依赖它。
+
+#### 和 PLAN 的偏差
+1. 偏移改成「距今天的天数」+ `isHome`（见上）：严格按「offset == 0 才切明天、其余 todayIndex + offset」会让自动看明天时 ▶ 第一下停在同一天。代价：自动看明天时小组件上看不到上完课的今天（开 App 看）。（待修清单 ② 要允许翻回今天。）
+2. 边界时刻多了「开课前 90 分钟」和「倒计时期间 now + 10 分钟」，否则「N 分钟后上课」最多陈旧 30 分钟（只靠系统周期）。2×1 共用同一个函数，这两类时刻对它是多余的几次重绘（无害，没为它单独加参数）。
+3. 列表高亮改为 `endMinutes > now`，自动看明天时高亮明天第一节。
+4. 验证「上课中」没加临时课（用的是周三本来的数据结构 + 临时取消停课）；自动看明天额外用了一条临时调休，两者都已恢复。
+5. 2×1 的「近期」只看今天 + 明天（按 PLAN）：周五晚上 / 周六会显示「近期没有课程」。
+
+#### 没验证 / 遗留
+- 18:00 门槛（今天没课）和跨天 00:00:30 只在 JVM 单测里验证（没等到 18:00，也不改系统时间）。
+- 非精确 `set` 的窗口是 0.75 × 距触发时长（≤ 1 小时）：远的边界会晚，靠 30 分钟系统周期重渲染时重排来收紧；Doze / 关屏期间不投递，亮屏后补。OEM 启动器（vivo / MIUI）对 `updatePeriodMillis`、previewLayout 的支持没法在模拟器上验证。
+- 设置页「手动添加小组件」对话框没提 2×1（只写在 shu_schedule/README.md）；根 README 由 F 决定是否引用。（F：根 README「四、桌面小组件」已加两个小组件的表和 2×1 的添加方法；App 内对话框仍没提。）
+
+### D：ICS 导出（opus55）
+
+#### 实现
+**规范依据（2026-10-07 当天抓取）**：RFC 5545 §3.1 取自 rfc-editor.org/rfc/rfc5545（WebFetch）；该页在 WebFetch 里截断在 §3.3.10，tavily 额度用完，所以 §3.3.11 / §3.6.1 / §3.6.5 / §3.6.6 / §3.8.6.3 / §3.8.7.2 读的是 icalendar.org 上按节拆开的 RFC 原文镜像。按原文落实的要点：一行 ≤ 75 **字节**（不含 CRLF），折行 = 在两个字符之间插「CRLF + 一个空格」，续行的空格也算进 75；TEXT 里 `\` `;` `,` 必须转义、换行写 `\n`、冒号**不**转义、不允许控制字符；VEVENT 的 UID / DTSTAMP 必须且只出现一次，DTEND 与 DURATION 互斥；DTSTAMP 必须 UTC；VTIMEZONE 至少一个 STANDARD / DAYLIGHT，子段里 DTSTART 用本地时间、TZOFFSETFROM / TZOFFSETTO 必填；DISPLAY 型 VALARM 必须有 ACTION、**DESCRIPTION**、TRIGGER，`TRIGGER:-PT15M` 默认相对开始。
+
+**导出器** `lib/features/settings/ics_exporter.dart`（纯 Dart，不碰 IO）：`IcsExporter.build({timetable, alarmMinutes, now})`；`sessionsOf(timetable)` 从 `startDate` 起用 `ScheduleUtils.addDays` 逐日走 `totalWeeks*7` 天（= `[startDate, addDays(startDate, totalWeeks*7-1)]`），每天 `effectiveDayOf` + `coursesOnEffective`，`week < 1 || week > totalWeeks` 跳过（和小组件快照 / 提醒规划器同一条规则；导入数据里周次可以超过总周数）。同一天内按（起始节、结束节、课程 id）排序，保证两次导出顺序一致。头部按 PLAN（`PRODID:-//简课表//1.4//CN`，`X-WR-CALNAME` 是转义后的课表名），VTIMEZONE = `TZID:Asia/Shanghai` + 一个 STANDARD（`DTSTART:19700101T000000`、`TZOFFSETFROM/TO:+0800`、`TZNAME:CST`）。事件：`UID:jkb-{课表id}-{课程id}-{yyyyMMdd}-{起始节}@cn.shu.schedule`、`DTSTAMP`（`now.toUtc()`，Z 结尾）、`DTSTART;TZID=Asia/Shanghai:yyyyMMddTHHmmss` / `DTEND`（本地日期字段 + 作息表的 "HH:mm"，不做跨天的毫秒运算）、`SUMMARY`、`LOCATION`（有才写）、`DESCRIPTION`（`教师：…` / `第 s-e 节` / `第 N 周 周X` / 调休日加 `调休，按第 N 周周X上课（备注）`，用 `EffectiveDay.description`）、`CATEGORIES:课程`；`alarmMinutes != null` 时 VALARM = `ACTION:DISPLAY` + `DESCRIPTION:课名 · 地点` + `TRIGGER:-PT{n}M`。`foldLine` 按 Unicode 码点累加 UTF-8 长度，所以 3 字节汉字、4 字节 emoji 都不会被切开。脏数据：作息表取不到时间的课跳过；结束不晚于开始时不写 DTEND（§3.6.1：DATE-TIME 型 DTSTART 的事件在开始那一刻结束）；同一 UID 只出一次；课名 / 课表名为空时用「课程」/「简课表」。
+
+**分享**：新文件 `lib/features/settings/system_share.dart`（`ShareFileRequest` + `shareFileWithSystemSheet`：写临时目录 → `SharePlus.instance.share(ShareParams(files: [XFile(path, mimeType)]))`，返回面板是否打开）。`TimetableShare._shareWithSystemSheet` 改成调它（`shareFile` / `pickText` / `resetIo` 测试钩子原样不动，去掉了 `dart:io` / path_provider / share_plus 的直接 import）。`lib/features/settings/ics_export_sheet.dart`：`IcsShare.shareFile`（`@visibleForTesting` 钩子）/ `resetIo()` / `requestFor(...)`（mime `text/calendar`，文件名 `jiankebiao-timetable-yyyyMMdd.ics`，用 `AppBrand.slug`）+ `showIcsExportSheet(context, timetable:, clock:)`。`BackupService.exportAndShare` 没改（它要返回值、以前的写法也能用）。
+
+**入口**：`settings_page.dart`「课表」分组「作息时间」后加 tile `settings-export-ics`「导出到日历（.ics）」（没有当前课表时禁用）；`timetable_manage_page.dart` 每张课表的 ⋮ 菜单加 `ics`「导出到日历（.ics）」（导出被点的那一张，不是当前课表）。底部弹窗 `ics-sheet`：标题、`ics-summary`（「「课表名」· 第 1-18 周 · 共 N 节课，调休、停课已算好」，学期内没有课时改成「没有可导出的内容」并禁用按钮）、`ics-hint`（PLAN 原文那句）、一行「导出的是一份快照：之后改课、调休，要重新导出一次」、提醒 ChoiceChip `ics-alarm-0`（无）/ `-10` / `-15` / `-30`（默认 = 上课提醒的 `leadMinutes` 在 10 / 15 / 30 里就用它，否则 15，和提醒开没开无关）、`ics-share`「生成并分享」（成功后关弹窗；失败 SnackBar「导出失败：…」并保留弹窗）。
+
+**文档**：根 `README.md` 只改了「九、已知限制」第 3 条（「App 里没有 ICS 导出（可以用网页工具…）」→ 已内置、在哪里点、是快照）。PLAN 说的 L57-61 在「给朋友装 → iPhone 办法二」里，按 §0「不改『给朋友装』一节」**没动**。`shu_schedule/README.md` 没有这类说法，没改。`assets/privacy.md`「你主动发起的分享」列表加了「导出到日历（.ics）」（措辞补充，没有新依赖 / 权限 / 联网，`PrivacyPolicy.version` 仍是 2，`pubspec.yaml` 没碰）。
+
+#### 测试
+519 → **543**（+24）。`test/ics_exporter_test.dart` 17 个（纯 Dart）：事件数 = 手算 54（含第 18 周周日、两天停课、一天调休、一门只在第 19-20 周的课、一条「按第 19 周」的调休）且 = `sessionsOf`；停课日无事件；调休日 = 周一的高数 + UID / 时间 / DESCRIPTION 调休行；周 > 总周数无事件；范围首尾 + 2026-11-02 / 2027-01-11 仍是 08:00（本机 11-01 回拨夏令时）；头部 16 行逐字、每个事件 UID / DTSTAMP 恰一、无 DURATION、无地点不写 LOCATION；DTSTAMP UTC（UTC 与本地 now 两种）；UID 两次导出一致且唯一；CRLF；长中文 + 4 字节 emoji 的 SUMMARY / LOCATION / DESCRIPTION 按字节切 CRLF 后每段 ≤ 75 且能严格 UTF-8 解码、展开还原；`foldLine` 75 / 75 / 52（ASCII）、75 / 73 / 4（汉字）、emoji 每段 18 个；转义（`\ ; , \n \r\n \r`、冒号、控制字符）；VALARM 有无 / TRIGGER / ACTION / DESCRIPTION；默认提醒映射；文件名；空作息表 / 结束早于开始；README 第 3 条与 privacy.md。`test/ics_export_sheet_test.dart` 7 个：tile 位置（「作息时间」之后、「上课提醒」之前）、弹窗内容与默认 15、切 30 后分享（钩子收到 `.ics`、`text/calendar`、`TRIGGER:-PT30M`、事件数 = 课次、弹窗关闭）、提醒 10 → 默认 10 + 选「无」不带 VALARM、提醒 20 → 默认 15、钩子抛错 → SnackBar + 弹窗保留、空课表按钮禁用、课表管理页菜单导出被点的那张。`flutter analyze` 零问题，`dart format` 0 changed。
+
+**Python 独立校验**（`.tmpbuild/plan14/D-ics-dump.dart` 用示例课表 + 国庆停课 / 调休 + 一门超长中文课生成 `D-sample.ics`，`D-ics-check.py` 只用标准库，结果在 `D-ics-check.log`）：1737 个物理行、145 个续行、最长 75 字节、游离 CR/LF 0、坏 UTF-8 段 0；105 个 VEVENT、105 个不同 UID；10/1、10/5 停课 0 个事件，10/10 调休 1 个（高等数学 A(一)，DESCRIPTION 带「调休，按周一上课（国庆调休，补 10/5 的课）」），12/26「按第 19 周」0 个；最后一天 2027-01-15（第 18 周周五，第 19-20 周被截掉）；每个事件的 TEXT 都没有未转义的 `;` `,`；`RESULT: OK`。
+
+#### 模拟器
+- 环境：emulator-5554，release 通用包 `flutter build apk --release` 一次，56.3MB / 59062475 字节，sha256 前 16 位 13143932963b35a3，versionCode 仍是 8，`adb install -r` → Success；截图 `shots/v140/D-1 … D-5`。
+- 设置「课表」分组出现新 tile（D-1）→ 弹窗「「示例课表」· 第 1-18 周 · 共 220 节课」、默认 15 分钟（D-2，上课提醒是 15）→ 点 30 分钟（D-3，uiautomator：只有「30 分钟」`selected=true`）→「生成并分享」：logcat `START u0 {act=android.intent.action.CHOOSER cmp=com.android.intentresolver/.ChooserActivityLauncher}`，系统面板「Sharing 1 file / jiankebiao-timetable-20261007.ics」（D-4）→ `input keyevent 4` 回到设置页、弹窗已关（D-5）。没 force-stop、没改系统时间；之后 `Alarm{…cn.shu.schedule}` 仍是 31 条（和 C 结束时一样）。
+
+#### 和 PLAN 的偏差
+1. VALARM 多了 `DESCRIPTION`（§3.6.6 对 DISPLAY 提醒是必填，PLAN 只列了 ACTION / TRIGGER）。
+2. 「无」的 chip key 是 `ics-alarm-0`。
+3. 根 README L57-61 没改（在「给朋友装」里，§0 禁止），只改了 L251 那条。
+4. 结束不晚于开始时省略 DTEND；取不到时间的课跳过；重复 UID 只出一次（PLAN 没写的脏数据处理）。
+5. `PRODID` 按 PLAN 写死 `1.4`，不跟 `appVersion` 走。
+6. 弹窗多了「共 N 节课」摘要和「快照」提示；学期内没有课时禁用分享按钮。
+
+#### 没验证 / 遗留
+- 真机导入没测：iPhone「日历」打开 .ics、微信转发 .ics 后能不能「添加全部」、Outlook / Google 日历网页导入、Android 上哪个 App 能直接打开 `text/calendar`（模拟器面板里只有 Quick Share / Drive / Messages / Bluetooth / Gmail）。DESCRIPTION 里的 `\n` 在各客户端是否显示成换行也没看。
+- 根 README 同一条里「没有课前提醒」是 B 之后的过时说法（不属于 D，留给 F）；「给朋友装 → iPhone 办法二」现在可以改成「让安卓同学在 App 里直接导出 .ics」，由负责那一节的会话决定。（F：「没有课前提醒」已改掉；「给朋友装」仍未动，交给那一节的负责人。）
+
+### E：周视图长按列头设调休 + 空状态三入口（opus55）
+
+#### 实现
+**E1 共用流程**：`TermSettingsPage._editOverride` 抽成 `lib/features/settings/date_override_flow.dart` 的顶层 `editDateOverride(context, appState, {DateTime? date, OverrideMode? initialMode})`。行为不变（日期冲突弹「这一天已经有设置」确认替换、改了日期删旧的那条），只有两处收紧：`editing` 由「传了 date」改成「这一天已有设置」（长按一个还没设置的日子，标题是「添加调休 / 停课」）；删旧日期前先确认旧日期真有设置。`initialMode` 在 `DateOverrideDraft.from(...)` 之后 `copyWith(mode:)`。学期设置页两处入口改调它，`override-*` 测试 key 全部没动，原有 4 个 UI 测试原样通过。
+
+**E2 长按列头**
+- `EffectiveDay.badge`：停课 →「休」，`actAsWeek` / `actAsWeekday` 任一非空 →「补」，没有设置或只写了备注 → null。`EffectiveDay.label` / `DateOverride.shortLabel`（「停课」/「调休」）**没改**，今日页、小组件快照、Kotlin 照旧。
+- 列头 `_weekdayCell`：`Semantics` → `Material(transparency)` → `InkWell(key: weekday-<yyyy-MM-dd>, onLongPress)` → `Ink`（今天的高亮色改用 Ink 画，长按有水波纹）→ `SizedBox.expand` → `FittedBox`。角标是 `override-<yyyy-MM-dd>` key 的小圆角 Container（休：`onSurfaceMuted` 75% 不透明；补：`accent`；字 9 号 `onPrimary`），**放在日期数字右边**而不是下面：模拟器上叠成三行时 CJK 字体把角标顶到 52 高列头的底边（第一次装包截图看到的），并排后每列一样高。没有课表时 `onLongPress = null`（没有地方存）。
+- 新文件 `lib/features/timetable/day_override_sheet.dart`：
+  - 纯函数 `daySuggestionOf(presets, config, date, {schoolId})` 复用 `HolidayPresets.planFor`（和「套用节假日安排」同一套：有 schoolId 且学校学期对得上用学校条目，否则国家安排），取这一天那条：学校 / 国家放假 →「假日表建议：停课（国庆节）」（备注里「放假」前面的部分，去掉「（国家安排）」）；学校 actAsDate →「假日表建议：按 10/7（周三）课表上课」（由 override 的 week + weekday 从 startDate 推回日期）；国家调休上班日（override 为 null）→「假日表建议：国家调休上班日」，点它打开预置按星期模式的编辑器；已经是这个设置时这一行禁用、副标题「已是这个设置」。
+  - `dayOverrideSheetTitle`（「10月8日 周四 · 第 4 周」，学期外写「不在本学期」）、`dayOverrideStateText`（「当前：停课（运动会）」/「当前：调休，按周一上课 · 当天 1 门课」/「当前：按原课表上课 · 当天没有课」）。
+  - `DayOverrideSheet`（key `override-sheet`，`isScrollControlled` + `SingleChildScrollView`，行：`override-sheet-suggest` / `-cancel` / `-actas` / `-edit` / `-clear`，另有 `-title` / `-state`）只负责 pop 出选择；`showDayOverrideSheet(context, date, {holidays})` 在面板关掉后用页面自己的 context 执行：套用建议 / 设为停课 / 清除 都是一键 + SnackBar「撤销」（恢复成之前那条），「调休：按某天课表上课」=`editDateOverride(initialMode: weekday)`，「编辑…」= 完整编辑器。已经停课时「设为停课」禁用。
+  - 假日表用 `HolidayRepository.load()`（内置或联网更新过的缓存），每次打开面板读一次；`WeekViewPage({holidayRepository, clock})` 可注入，`HomeShell` 把自己的 `holidayRepository` 传下去（`_pages` 从 `static const` 改成 `late final`）。
+- 周末列：`_visibleDays(config, timetable, week)` 改成按周算。显示周末 → 7 天；隐藏 → 周一到周五，加上这一周里 `isOverridden`（停课或调休，只写备注不算）或调休展开后有课的周六 / 周日。列头（`_viewWeek`）、网格每一页（`_weekPage` 的 week）、紧凑字号测量（`_weekNeedsCompact`）都用同一个函数，列宽 = 这一页宽 / 这一页列数。翻页时列头在 `onPageChanged` 那一刻换列数（和以前换日期同一时机）。**只加有内容的那一天**：周六补课而周日空着的一周是 6 列（PLAN 原文「把该天也显示出来」；任务说明里写的「7 columns」按 PLAN 理解）。学期设置「显示周末」副标题相应改成「关闭后只显示周一到周五；某周的周六、周日有课或有调休时，那一天照样显示」。
+- 周课表 `importRouteName` 挪到新文件 `timetable_empty_state.dart`，`week_view_page.dart` `export ... show importRouteName`，`main.dart` / `app.dart` 的 import 不用改。
+
+**E3 空状态**
+- `EmptyState` 加 `tertiaryLabel` / `onTertiary`（第二个 TextButton）和 `keyPrefix`（按钮 key `<prefix>-primary/secondary/tertiary`，不给就没有 key）；外层 `Padding` 换成带同样 padding 的 `SingleChildScrollView`，三个按钮在矮屏上不溢出。
+- 新 `TimetableEmptyState`（`lib/features/timetable/timetable_empty_state.dart`）：从教务导入（`pushNamed('/import')`）/ 手动添加（`CourseEditorPage(initialDay, 第 1 节)`）/ 打开同学分享的文件（`importTimetableFromFile(..., replaceEmptyCurrent: true)`）。周视图 `week-empty-*`（说明文字改成「可以从教务系统一键导入、手动添加，也可以打开同学分享给你的课表文件。」）；今日页 `today-empty-*`：没有课表「还没有课表」、有课表但 0 门课「这张课表还没有课程」（以前这种情况只写「今天没有课程」、没有入口）。
+- 导入覆盖：`TimetableShare.importInto(..., {overwriteId})`（文件里**第一张**覆盖它，其余照常新建，最后一张成为当前）、`pickAndImport(..., {replaceEmptyCurrent})`（**选完文件后**再看当前课表是否 0 门课）、`TimetableImportOutcome.replacedId`、`importTimetableFromFile(..., {replaceEmptyCurrent = false})`。覆盖走 `applyImport(overwriteId:)`，所以**保留原课表名**（「我的课表」）和 id，换掉课程、学期配置（含调休）、导入元数据；提示「已导入到当前课表「我的课表」，共 N 门课」。课表管理页和设置页的入口仍是默认参数，行为不变。
+- 复课：`ScheduleUtils.nextCourseAt(now, tt, {lookaheadDays})` 返回 `({Course course, DateTime date})?`，`nextCourse` 改成调它取 `.course`（行为不变）。今日页 `_resumeText`：只在学期内；`lookaheadDays = daysBetween(今天, startDate + totalWeeks*7 - 1)`；下一节课的日期距今 ≥ 2 天 → 空状态说明文字写「10月8日（周四）复课」，否则照旧「到课表页看看这一周的安排吧。」。所以普通周六（下周一 2 天后）也会写「10月19日（周一）复课」，周日不写——按 PLAN 字面。`TodayPage({clock})` 加了可注入时钟（`ReminderSettingsPage` / ICS 弹窗同样的 `DateTime Function()?` 写法）。
+
+#### 测试
+543 → **573**（+30）。`test/week_view_day_override_test.dart` 13 个（时钟固定 2026-10-07，FakeHolidayRepository）：badge / label、面板标题与状态文案、`daySuggestionOf` 学校 actAs / 学校停课 / 国家放假 / 国家上班日 / 已套用；长按 10/8 出面板（标题、状态、没有建议行和清除行）；设为停课 → 列头「休」、课消失、SnackBar 撤销恢复；清除；学校建议一键 → `actAs(week 4, weekday 3, note)`、列头「补」、周三课出现两次、再开面板建议行禁用；国家上班日建议行 → 编辑器按星期模式；「调休：按某天课表上课」→ 编辑器预置、选周一保存；「编辑…」编辑模式；隐藏周末：第 4 周 6 列（周六补课、和列头对齐、能长按）→ 下一周 5 列（周五课对齐）→ 回来 6 列 → 打开显示周末 7 列；周日停课 + 周六有课 → 7 列；没有课表时列头不响应长按。`test/empty_state_entries_test.dart` 9 个：EmptyState key / 无 key；周视图空课表三按钮都能点（导入路由、课程编辑页、文件选择取消）；没有课表也三按钮；今日页 null / 0 门课三按钮、有课后消失；周视图 / 今日页从文件导入覆盖空课表（1 张、id 和名字不变、2 门课、调休带过来、SnackBar 文案）；没有课表时导入新建、用文件里的名字；`pickAndImport` 三种情况；`importInto` 只覆盖第一张。`test/today_resume_test.dart` 8 个：`nextCourseAt` 日期 + 14 天默认找不到 20 天长假；10/1 停课 →「10月8日（周四）复课」；10/3 周六同；10/1-10/20 停课 →「10月21日（周三）复课」；10/7（明天有课）不写；普通周六写 / 周日不写；学期最后一个周末与开学前不写；有课照常列出。改了 `test/week_view_override_test.dart` 的两处断言（「停课」/「调休」→ 角标「休」/「补」，并断言周视图里不再出现这两个词）。`flutter analyze` 零问题，`dart format` 0 changed。
+
+#### 模拟器
+- 环境：emulator-5554，release 通用包；**打了两次**：第一次装上后发现角标贴底，改成并排后重打一次，56.3MB / 59078951 字节，sha256 前 16 位 d290bdb4de2069ad，`adb install -r` Success；截图 `shots/v140/E-1 … E-10`。
+- 第 4 周 10/5-10/7「休」（E-1）、第 3 周 10/1-10/4「休」（E-2）；长按 10/8 面板「10月8日 周四 · 第 4 周 / 当前：按原课表上课 · 当天 3 门课」（E-3）；长按 10/10「假日表建议：国家调休上班日」（示例课表没有 schoolId，走国家安排；E-4）→ 点它进编辑器、已选「按某个星期上课」（E-5）→ 选周三保存 → 10/10 列头「补」、出现周三的课（E-6，uiautomator 读到「周六 10月10日 调休，按周三上课」）；学期设置关「显示周末」→ 第 4 周 6 列含周六 10/10（E-7）、第 5 周 5 列（E-8）→ 再打开。课表管理新建空的「我的课表」→ 周视图三入口（E-9）、今日页「这张课表还没有课程」三入口（E-10；这两张是第一次的包，空状态和角标改动无关）→ 切回示例课表、删除空课表（课表管理只剩示例课表）。示例课表原来没有 10/10 补课：「套用节假日安排」对没有学校的课表只把国家调休上班日列成「需要手动设置」、不能勾选，所以用长按面板设了「按周三上课」并保留。没 force-stop、没改系统时间；`Alarm{…cn.shu.schedule}` 31 → 35（10/10 多了课，B 的提醒规划器按数据变化重排，符合预期）。
+
+#### 和 PLAN 的偏差
+1. 角标放在日期右边（不是下面），原因见上。
+2. 隐藏周末时只加有内容的那一天（6 列），不是成对加周六周日。
+3. 国家调休上班日没有可直接套用的规则，建议行改为打开编辑器（PLAN 写「一键套用」，这类日子没有可套的内容）。
+4. 一键操作统一带「撤销」（PLAN 只要求「设为停课」）。
+5. 覆盖空课表时保留原课表名（`applyImport` 既有约定），不改成文件里的名字。
+6. 复课文案放在今日页空状态的说明行（标题「今天停课。」下面），顶部副标题不变。（普通周六也写复课属于待修清单 ③。）
+7. release 包打了两次（任务说明要求一次），第二次只为验证角标修复。
+
+#### 没验证 / 遗留
+- 真机上「打开同学分享的文件」从空状态走系统文件选择器没点（file_picker 弹窗，测试用 `pickText` 钩子）；模拟器只截了入口。
+- 模拟器上没截学校数据的「假日表建议：按 10/7（周三）课表上课」（示例课表没有 schoolId；widget 测试覆盖）。
+- 根 README「一、功能」第 1 条和版本历史还没提长按列头（PLAN 归 F）。（F：已补，功能列表和「十、版本历史」1.4.0。）
+- 学期设置「显示周末」副标题是第二次打包之后改的（纯文案），模拟器上装的包里还是旧的「关闭后课表只显示周一到周五」；F 打正式包时自然带上。（F：1.4.0 正式包里已是新副标题，截图 F-9。）
+
+### F：版本、文档、打包、模拟器升级验证（opus55）
+
+#### 实现
+- 版本：`pubspec.yaml` `1.3.1+8` → **`1.4.0+9`**，`lib/core/app_brand.dart` `appVersion` → `'1.4.0'`。grep `1.3.1` / `versionCode` / `+8`（lib、test、android、两个 README、`tool/gen_latest.py`）：
+  其余命中都是注释里的版本标记或 1.4.0 示例；`build.gradle.kts` 用 `flutter.versionCode / versionName`，gen_latest 默认读 pubspec，没有测试钉 appVersion 字符串，所以只改这两处。
+- 根 `README.md`（「给朋友装」一节**逐字未动**：改前改后用 awk 截出该节比 sha256，都是 fac23437…）：
+  开头功能列表（上课提醒、4×2 状态头部 / 自动看明天、2×1、ICS、长按列头、「休」「补」、周末补课列、空状态三入口、假日表联网刷新、Gitee / jsDelivr / GitHub 与一处配置）；
+  「一、下载与安装」表格文件名 v1.3.0 → v1.4.0（这一节不属于「给朋友装」）；「3. 升级」加 1.3.x → 1.4.0 会再确认一次隐私、提醒默认关闭；
+  「三 → 导不进来」第 1 条加空课表直接导入；「四、桌面小组件」加两个小组件的表、2×1 只能从小组件列表添加、状态头部、自动看明天、边界刷新；
+  「五、调休」加提醒 / ICS 同样按调休、假日页版本与刷新按钮；「六、设置一览」加 添加桌面小组件 / 导出到日历（.ics）/ 上课提醒，课表管理 / 学期设置 / 备份 / 检查更新各补一句；
+  「七、隐私」权限改成与 privacy.md、`aapt2 dump permissions` 一致（原来「App 自己只申请 INTERNET 一个权限」是 B 之后的过时说法），并写明提醒、导出日历不联网；
+  「八」小组件 FAQ 改写 + 新增「上课提醒没响 / 晚了几分钟？」；「九」第 3 条去掉「没有课前提醒」、注明 .ics 还没实测导入；「十」加 1.4.0。
+- `shu_schedule/README.md`：新增「上课提醒（v1.4.0）」「导出到日历（.ics，v1.4.0）」「假日表与更新源（v1.4.0）」三节（「桌面小组件」「调休 / 停课」两节 C / E 已写）。
+- 本节整理：见 v1.4.0 开头的说明与总表。
+
+#### 测试
+- `flutter analyze` → `No issues found!`；`dart format --output=none --set-exit-if-changed lib test` → 120 files，0 changed；`flutter test` → **`+573: All tests passed!`**
+  （日志 `.tmpbuild/plan14/testrun-F.log`）。F 没加测试；读 README 的两个测试（`ics_exporter_test`「没有 ICS 导出」、`widget_android_config_test`「下一节课 / 小组件列表」）照样通过。
+
+#### 打包
+- `flutter build apk --release` 一次（Gradle 47.7 s）→ `build/app/outputs/flutter-apk/app-release.apk`：56.3MB = **59,078,951 B**，
+  sha256 **`db6adb891f572ccb1b3c6f3ec350bcec2c54de4c928b62cf7ece6774a0df773a`**；`aapt2 dump badging` →
+  `package: name='cn.shu.schedule' versionCode='9' versionName='1.4.0' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36'`、minSdk 24、targetSdk 35。
+  字节数恰好和 E 的第二个包相同，sha256 和 versionCode 不同。
+- `aapt2 dump permissions`：INTERNET、POST_NOTIFICATIONS、SCHEDULE_EXACT_ALARM、RECEIVE_BOOT_COMPLETED、VIBRATE、WAKE_LOCK、ACCESS_NETWORK_STATE、FOREGROUND_SERVICE
+  + `cn.shu.schedule.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`，和 privacy.md「三、权限清单」一致。
+- 按本轮分工**没打 arm64 包、没复制进 `dist/`**（留给最终打包）。
+- `python shu_schedule/tool/gen_latest.py --apk shu_schedule/build/app/outputs/flutter-apk/app-release.apk --changelog "…" --out .tmpbuild/plan14/latest-draft.json`
+  → 退出码 0，「已写入 …（776 字节）」，并警告「kRepo 还是占位符，downloadUrls 先用占位地址」。内容：`versionCode 9`、`versionName "1.4.0"`、顶层 `sha256` = 上面的 APK sha256、
+  `apks[0] = {file: "app-release.apk", abi: "universal", bytes: 59078951}`、`holidays = {sha256: e6d0cb56…2003, updatedAt: "2026-10-06", bytes: 3117}`（与 `sha256sum assets/holidays.json` 一致）、
+  `downloadUrls = ["https://github.com/OWNER/REPO/releases/tag/v1.4.0"]`。
+
+#### 模拟器
+- 环境：emulator-5554，API 35；截图 `shots/v140/F-1 … F-14`。
+- 升级前装的是 B–E 打的 versionCode 8 包（`versionName=1.3.1`，lastUpdateTime 13:57:43）。`adb install -r` → `Success`；
+  `dumpsys package cn.shu.schedule` → `versionCode=9 minSdk=24 targetSdk=35` / `versionName=1.4.0` / `lastUpdateTime=2026-10-07 14:07:43`。
+- 闹钟：`dumpsys alarm | grep -c cn.shu.schedule` 装前 119 → 装后 119 → 启动后 119；`Alarm{…cn.shu.schedule}` 条目 35 → 35 → 35
+  （32 条 `*walarm*` 提醒 + 2 条 `BOUNDARY_REFRESH` + 1 条 `DAILY_REFRESH`）。启动 logcat：`I flutter : [reminders] 已安排 32/32 条（exact=false）`，
+  `AppWidgetServiceImpl` 通知 widget 9 和 12 更新。
+- 数据保留：第 4 周 10/5-10/7「休」、10/10「补」（读屏「周六 10月10日 调休，按周三上课」）（F-1）；第 3 周 10/1-10/4「休」（F-2）；学期设置列表 9/23、9/25-27、10/1-10/7 停课 + 10/10「按周三的课上」（F-10）。
+- **隐私确认框没有再弹**：这台模拟器在 B 时已经用 `PrivacyPolicy.version = 2` 的包同意过 v2，所以从 versionCode 8 升到 9 不会再问，逻辑正确；
+  真正的 1.3.1 → 1.4 重新确认截图仍用 B-1。启动后提醒照常重排（`ReminderService` 要求同意 ≥ v2）也说明同意状态保留了。
+- 设置页：F-3（桌面小组件 / 课表含「导出到日历（.ics）」/ 上课提醒「已开启 · 提前 15 分钟」/ 显示）、F-4（备份、「关于简课表 v1.4.0」、「检查更新 · 未配置更新源」、隐私说明新副标题）。
+- 上课提醒页：权限卡「通知 已允许 / 精确闹钟 未允许：提醒可能晚几分钟」（F-5）；「即将触发」：「10月7日 停课 · 不提醒」、21:00 预告、10/8 07:45 / 09:45 / 12:45 …（F-6）；
+  底部「共 32 条，系统里已安排 32 条（含测试提醒）」（F-7）；10/9 21:00 预告「明天按第 4 周周三上课，共 3 节，08:00 开始」、10/10 每条带「（调休：按第 4 周周三上课）」（F-8）。
+- 学期设置「显示周末」新副标题「关闭后只显示周一到周五；某周的周六、周日有课或有调休时，那一天照样显示」（F-9）。
+- 套用节假日安排：头部「假日表 · 内置 2026-10-06」（F-11）→ 右上角刷新 → SnackBar「更新源未配置」（F-12）。
+- 「发送测试提醒」→ 通知栏「测试提醒 / 上课提醒会像这样出现在通知栏。」（F-13）；`dumpsys notification --noredact`：`id=9001 importance=4 … channel=class_reminder … category=reminder`、`icon=Icon(typ=RESOURCE pkg=cn.shu.schedule id=0x7f070088)`。
+- 桌面（F-14）：4×2「10月7日 周三 / 第 4 周 · 今天 / 今天停课，好好休息 ✨ / 国庆节放假（国家安排）」；2×1「大学英语综合课程与跨文化交际（三） / 明天 · 08:00-08:45 / 东区 J-101」。
+- 没 force-stop、没改系统时间；最后 App 停在课表页第 4 周。
+
+截图对照 PLAN 清单：隐私重新同意 = B-1（复用）；设置页新分组 = F-3 / F-4；上课提醒页 = F-5 … F-8；测试通知 = F-13（另有 B-7 / B-11 的定时测试）；
+小组件状态头部 = C-5 / C-6 / C-7 / C-9（复用，C 之后 Kotlin 没再改）+ F-14；2×1 = C-3 / F-14；ICS 弹窗与系统分享面板 = D-2 / D-3 / D-4（复用，UI 没变）；
+长按面板与「休」「补」= E-3 / E-4 / E-5 / E-6 + F-1 / F-2；周六补课列 = E-7 / E-8（复用；副标题新文案见 F-9）；空状态三入口 = E-9 / E-10（复用）；假日页数据版本与刷新 = F-11 / F-12（新）。
+
+#### 和 PLAN 的偏差
+1. 只打了通用包；arm64 包、复制进 `dist/`、正式 `dist/latest.json` 留给最终打包（本轮任务说明）。`latest.json` 草稿写在 `.tmpbuild/plan14/latest-draft.json`。
+2. 隐私重新同意截图复用 B-1（原因见上）。
+3. 根 README「一、下载与安装」表格的文件名顺手改成 v1.4.0。
+
+#### 没验证 / 遗留
+- 「给朋友装」一节（另一个会话负责）仍写 v1.3.0 的文件名与大小（安卓第 1 步、「解析包错误」那句、纯血鸿蒙第 2 步），「iPhone 办法二」仍让人用网页工具转 .ics——
+  现在可以改成让安卓同学在 App 里直接「导出到日历（.ics）」。需要那一节的负责人更新。
+- 上面列出的 C / D / E 复用截图都来自 versionCode 8 的包；1.4.0 正式包上只重看了 F-1 … F-14 这些画面。
+- 待修清单 ①–⑤ 见本节开头；F 没有改 A–E 的代码。
+
+### 修复轮（opus55）
+
+依据 `.tmpbuild/plan14/fixlist-final.md`（25 条，按编号执行）和 `review-G.md`。没动 `PrivacyPolicy.version`（仍 2）、版本号（仍 1.4.0+9）、`site/`、`keys/`、`key.properties`、根 README「给朋友装」（改前改后该节 sha256 都是 fac23437…）。
+
+#### 实现（按 fixlist 编号）
+1. **精确闹钟改为 USE_EXACT_ALARM**（规划者拍板）。官方写法已核对：WebFetch 超时，tavily 额度用完，改用 curl 抓 developer.android.com。
+   `reference/android/Manifest.permission#USE_EXACT_ALARM` 原文写明同时用两者时 `SCHEDULE_EXACT_ALARM` 加 `android:maxSdkVersion="32"`；
+   `alarms/schedule` 页写了 Android 12+ 非精确闹钟「within one hour」。Manifest 现为 `SCHEDULE_EXACT_ALARM maxSdkVersion=32` + `USE_EXACT_ALARM`。
+   保留「能精确就 exactAllowWhileIdle，否则 inexactAllowWhileIdle」的回退。`ReminderPermission` 新增 `exactBySystem`：网关经 `NativeBridge.deviceInfo()['sdkInt']`
+   取 API level（可注入），≥33 且能精确时为 true。权限卡文案：「系统已授予：提醒准点送达」/「已允许：…」/「未授权时提醒最多可能晚 1 小时」。
+   打开总开关时如果没有精确权限，弹 `reminder-exact-prompt`「去授权」。「1 分钟后测试」的 SnackBar 和说明、privacy.md（权限清单加 USE_EXACT_ALARM、只用于准点提醒，第 2 版变更说明同步）、
+   两个 README 里「晚几分钟」的句子全部改掉；根 README:256 那句因果推断（「1 分钟后测试」能按时到，正式提醒就能到）已删。字符串断言测试防止回退。
+2. 规划窗口 10 → 14 天。新增 `ReminderKind.horizonEnd`：窗口最后一天 previewHour 发「提醒已排到 x月x日，打开简课表就会续上」（渠道 evening_preview，payload `today`，
+   id = FNV(`horizon|日期||0`)）。只在窗口之后学期里还有课时生成。同一时刻排在最后一晚的预告后面。「即将触发」把它单独放在列表末尾。
+   **和 fixlist 示例的出入**：示例写「10月21日」，实际写的是最后一个排了上课提醒的日子（今天 10/7 → 10/20）。10/21 的上课提醒并没有排，写 21 日会误导。
+3. 提醒页顶部「提醒跟随当前课表：xxx」，设置 tile「已开启 · 提前 15 分钟 · 跟随「xxx」」。`ReminderService.timetableSwitches`（broadcast stream）在提醒开着、
+   当前课表 id 变化时发课表名，第一次看到不算。`HomeShell` 弹「上课提醒已切换到「xxx」」，不 hide 当前 SnackBar，导入页自己的提示排在前面。
+4. `ReminderService.needsPermission` / `needsPermissionFor(settings)`：提醒开着、权限已查到且通知未授予。tile 显示「已开启 · 没有通知权限」。
+   `HomeShell._startReminders` 在 init 之后，若需要就弹 `reminder-needs-permission`（带「去授权」：先申请，系统不再弹框时打开通知设置）。
+5. 隐私说明被拒绝时调用 `gateway.cancelAll()`。插件源码已确认：`cancelAllPendingNotifications` 只用 `onAttachedToEngine` 拿到的 Context 和本地缓存
+   （FlutterLocalNotificationsPlugin.java L1429 / L1891），Dart 端 instance 由 `registerWith` 设置，都不依赖 `initialize`。
+6. 「（含测试提醒）」只在 `pending > plan.length` 时显示；`scheduleTestIn` 先赋 `_pendingTestAt` 再 await，排程失败时清回。规划器补了三个用例：开学前一晚的预告、00:10 的课提前 15 分钟（→ 前一天 23:55）、调休到第 19 周不提醒。
+7. 根 README 提醒 FAQ 补了这些：关机期间错过的提醒开机时一起弹出；系统折叠成组时点组标题只打开 App；14 天续排；提醒跟随课表。
+8. 4×2 偏移语义改为「距今天的天数」：`OFFSET_DEFAULT = -1` 表示默认那天，0 = 今天。`readOffset` 默认值、`DayWidgetService` 兜底值、`nextPageOffset`
+   （落在默认那天时存哨兵，RESET → 哨兵）、`resolveDisplay`（k≥0 = 今天 + k）、箭头可用态（新增 `canPagePrev` = daysFromToday > 0、`canPageNext`）都同步改了。
+   头部新增「第 N 周 · 今天 · 已结束」。存储 key 从 `offset_<id>` 改名为 `day_offset_<id>`：老版本存的 0 表示「默认」，不改名的话升级当天会被误读成「今天」。
+9. 2×1 往后找 7 天（`NEXT_CLASS_LOOKAHEAD_DAYS`）。标签规则：1 天 →「明天」，2–6 天 → 星期（「周一 · 08:00-08:45」），正好 7 天 → 日期（「10月14日」，避免和今天同一个星期几混淆）。仍然没有 →「近期没有课程」。
+10. 小组件「可能晚几分钟」→「可能晚十几到几十分钟（系统省电策略所致）」（根 README 两处、shu_schedule/README 一处）。
+11. 假日表只有 updated / unchanged 才记 `lastHolidayRefresh`（参数 `onAttempt` 改名为 `onSuccess`，在成功后调用）。`holiday_repository_test` 原第 260 行的用例改为「成功后记」，
+    并新增「失败不记」「refreshFor 失败不写回、下次不被节流」两个用例。
+12. 同一地址的 `latest.json` 与 `holidays.json` 并发取，整次刷新受 `totalTimeout`（默认 10 秒，Stopwatch 计时）约束，单个地址取 min(5 s, 剩余)。privacy.md 检查更新那条补了「刷新假日表时会同时读一次版本说明以核对校验值」。
+13. 地址返回「不比当前新」时接着试后面的地址。校验时，传入 manifest 的 sha 对不上（manifest 来自还没同步的镜像）就再读这个地址自己的 `latest.json` 核对，否则镜像滞后仍会被 SHA 挡住。测试：Gitee 旧、jsDelivr 新 → updated（有无 SHA 各一个）。
+14. 错误串只带「host：简短原因」（`HolidayRepository.shortError`：HttpException 去掉 URL，Socket / TLS 换成中文，其他截到 60 字）。SnackBar 只显示 `firstError`。
+15. 关于页拆成两句：「只在…时联网。」+「检查更新和更新节假日表的请求里不带课表或个人信息；从教务导入时，账号密码只提交给学校教务系统。」
+16. ICS：`build(utcOffset:)` 默认 +08:00（纯函数，测试注入其他值）；不是 +08:00 时输出浮动本地时间（没有 TZID / VTIMEZONE / X-WR-TIMEZONE）。弹窗 `utcOffset` 默认取 `DateTime.now().timeZoneOffset`，
+    不是 +8 时显示「将按手机当前时区导出」。PRODID 改用 `appVersion`（→ `-//简课表//1.4.0//CN`）。注：模拟器时区是 GMT，在它上面导出会走浮动时间。
+17. 弹窗、分享文字、两个 README 都改为：「建议导入到一个单独的日历；课表或调休有变化时，先清空那个日历再重新导入，日历不会自动删除已取消的课」。
+18. 隐藏周末时，停课日只有「原本有课」才单独出列（周视图本地 `_wouldHaveClasses`，与规划器同一判断），调休照旧出列。原第 515 行的用例改为 6 列 + 10/11 不出列，另加「10/3、10/4 停课原本无课 → 5 列」「原本有课的周六停课 → 出列带休」。
+19. 复课规则抽成顶层 `resumeTextFor(now, timetable)`：今天被停课覆盖 / 工作日没课且下一上课日 ≥2 天 / 周末且下一上课日晚于下周一。
+    **除第 136 行外还改了第 128 行的用例**（10/7 停课、明天复课：按新规则「今天被停课覆盖」就写）。新增「普通周末不写」「周末接长假写」「工作日没课 2 天」三个用例，两个 README 同步。
+20. `TimetableShare.pickAndImport(confirmReplaceTerm:)`：覆盖空课表、并且 `hasCustomTermSettings`（有 overrides 或开学日 ≠ 默认）时先确认，取消就返回 null、什么都不改。
+    `importTimetableFromFile` 弹 `import-replace-term-confirm`「当前课表的学期设置会被文件里的替换，继续？」。
+21. 「当天 N 门课」→「当天 N 节课」，预告「共 k 节」→「共 k 节课」、「等 N 节」→「等 N 节课」，ICS 弹窗 “添加全部” → 「添加全部」。课表管理 / 导入 SnackBar 里的「N 门课」数的是课程条目，没改。
+22. `BackupService.exportAndShare` 改走 `shareFileWithSystemSheet`，文件名、MIME、subject、text 都不变。
+23. `shu_schedule/android/app/build.gradle.kts`、`shu_schedule/README.md` 恢复 CRLF（Python 先统一成 LF 再转 CRLF）。`git ls-files --eol` 现为 `i/crlf w/crlf`，`git diff --stat` 为 12 行 / 49 行（=真实改动）。全仓库没有其他 i/w 不一致的文件。
+24. 根 README「十一、发布」补了：APK 不进仓库只放 Releases（jsDelivr 有体积上限，数值未查证）；`holidays.json` 与 `latest.json` 同一次提交；镜像滞后会接着试、并发、10 秒。
+25. 新 `test/privacy_consistency_test.dart`：同意框的「从教务导入 / 检查新版本 / 节假日表」对应 privacy.md 第二节的三个加粗标题，另外核对共同说法（不会发出任何网络请求、不带任何、IP 地址、本机生成）、第二节恰好 4 个场景，以及关于页文案。
+- 测试缺口 2 **已做**：新 `test/reminder_gateway_test.dart` 用 `AndroidFlutterLocalNotificationsPlugin` 子类替换 `FlutterLocalNotificationsPlatform.instance`，
+  测了精确 → 非精确回退、`_restorePendingTest`、`cancelAll` 清测试、P3-14 的竞态、`exactBySystem`（sdk 35 / 32 / null）。P3-14 的用例做过反向验证：把赋值挪回 await 之后，这条测试会失败。
+
+#### 测试
+- `flutter analyze` → No issues found!；`dart format --set-exit-if-changed lib test` → 0 changed；`flutter test` → **+613: All tests passed!**（573 → 613，日志 `.tmpbuild/plan14/testrun-X.log`）。
+- `./gradlew :app:testDebugUnitTest` → BUILD SUCCESSFUL，`WidgetTimeLogicTest tests="24" failures="0" errors="0"`（20 → 24）。
+
+#### 打包与模拟器（emulator-5554，API 35，设备时区 GMT）
+- 只打了一次通用包：`flutter build apk --release` → 59,112,183 B（56.4MB），sha256 `121d45b52b5c431a1929ca221f6ff18f5b5d2cced6a4336d7793288df2dc12e8`；
+  aapt2：`versionCode='9' versionName='1.4.0'`；permissions 里有 `SCHEDULE_EXACT_ALARM' maxSdkVersion='32'` 和 `USE_EXACT_ALARM`。`adb install -r` → Success；
+  `dumpsys package`：`android.permission.USE_EXACT_ALARM: granted=true`。
+- (a) 启动 logcat 显示 `[reminders] 已安排 41/41 条（exact=true）`。`dumpsys alarm`：41 条 ScheduledNotificationReceiver 闹钟全部是 `window=0 exactAllowReason=policy_permission flags=0x5`，`window=+1h` 为 0 条
+  （修复前 F 的抓取是 32 条 `window=+1h`）。小组件的 3 条（2 BOUNDARY_REFRESH + DAILY_REFRESH）仍是非精确 RTC。权限卡「系统已授予：提醒准点送达」：X-2；tile：X-1。
+- (b)(c) 当时设备时间 15:20–16:15，今天 10/7 停课（没有课），要到 18:00 才进入「自动看明天」；明天 10/8 有课，2×1 不会往后找。按指令**只靠 JVM 测试**，没有改数据也没有改时间。
+  补看了一项：4×2 ▶ →「10月8日 · 第 4 周 · 明天 + 回到今天」，◀ 回到「10月7日 · 第 4 周 · 今天」（X-6 / X-5），说明 key 改名后翻页正常。
+- (d) 「即将触发」末尾是「21:00 提醒已排到 10月20日，打开简课表就会续上」，计数行「共 41 条，系统里已安排 41 条。…接下来 14 天。」（没有「含测试提醒」）：X-3。
+- (e) 假日页刷新 → SnackBar 只显示「更新源未配置」：X-4。crash 缓冲区没有 cn.shu.schedule。没有 force-stop、没有改系统时间。
+
+#### 没做 / 遗留
+- 按 fixlist 不做：P3-2（滑动途中列头和网格列数短暂不一致）、fixlist ④（通知组摘要；README 已说明点组标题只打开 App）。
+- 自动看明天时 ◀ 回到今天、2×1 往后找到周一，都只有 JVM 测试，没在设备上看。
+- 检查更新（UpdateChecker）本身仍是「第一个成功的源为准」，镜像滞后会让它看不到新版本（不在本轮范围）。
+- 国产 ROM / 深度 Doze 下精确提醒的实际送达时刻仍没实测（review-G「未能验证」1）；.ics 在各日历 App 里的导入行为同样没实测。
+
+### 发布包（最终打包，opus55）
+
+- **通用包没有重打**：`find shu_schedule/lib shu_schedule/android shu_schedule/assets shu_schedule/pubspec.yaml shu_schedule/pubspec.lock -newer <修复轮的 app-release.apk> -type f`
+  只列出 `shu_schedule/android/.gradle/9.3.1/…` 和 `.gradle/buildOutputCleanup/` 下 5 个 Gradle 自己的 lock / 状态文件（修复轮之后跑 `testDebugUnitTest` 留下的，已 gitignore），
+  没有源码、资源、asset 或 pubspec 改动，所以直接复制修复轮的包；没有重跑 `flutter test`（仍是修复轮的 +613）。
+- arm64 包：`flutter build apk --release --target-platform android-arm64`（Gradle 45.8s，日志 `.tmpbuild/plan14/P-build-arm64.log`），先复制通用包再打，避免同名输出被覆盖。
+
+| 文件 | 字节 | SHA-256 |
+|---|---|---|
+| `dist/简课表-v1.4.0.apk`（通用） | 59,112,183（56.4 MiB / 59.1 MB） | `121d45b52b5c431a1929ca221f6ff18f5b5d2cced6a4336d7793288df2dc12e8` |
+| `dist/简课表-v1.4.0-arm64.apk` | 21,539,853（20.5 MiB / 21.5 MB） | `1b20299b91a225d770cbd8bf4d3aa8a7ce09d56d5f32fd2330162758d9c00d1d` |
+| `dist/latest.json` | 1,240 | （内容见下） |
+
+- 两个包 `aapt2 dump badging | head -3` 相同：`package: name='cn.shu.schedule' versionCode='9' versionName='1.4.0' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'`
+  / `minSdkVersion:'24'` / `targetSdkVersion:'35'`。两个包都是 **versionCode 9**（没用 `--split-per-abi`，不会出现 2009）。
+- `native-code`：通用包 `'arm64-v8a' 'armeabi-v7a' 'x86_64'`；**arm64 包也是这三个**——`unzip -l` 看 libflutter.so / libapp.so 只有 arm64-v8a，
+  插件带的 libdartjni.so、libdatastore_shared_counter.so 三个 ABI 都有。和 1.3.0 / 1.3.1 的 arm64 包 lib/ 结构完全一致（v1.3.1 一节已记），这次没改构建配置。
+  推断（未在 32 位真机 / 模拟器上验证）：32 位 armv7 手机能装上 arm64 包但启动时缺 libflutter 闪退，所以根 README「一」的表格补了「或装上后一打开就闪退（少数 32 位老手机）时改用通用包」，
+  并把「体积小一半」改成实际的「约 21.5 MB，只有通用包的三分之一多」/「约 59 MB」（README 沿用「给朋友装」的十进制 MB）。「给朋友装」一节没动（改前改后截该节 sha256 都是 fac23437…）。
+- `dist/latest.json`：`gen_latest.py --version 1.4.0+9 --apk "dist/简课表-v1.4.0-arm64.apk" --apk "dist/简课表-v1.4.0.apk" --changelog-file .tmpbuild/plan14/changelog-1.4.0.txt --out dist/latest.json`
+  （D:/conda/miniconda3/python.exe，exit 0）。arm64 包放第一个，所以顶层 `sha256` = arm64 包（README「十一」的约定）；`holidays` = `e6d0cb56…2003` / 2026-10-06 / 3117 B，与 `sha256sum` 一致，
+  `holidays.json` 是 LF、`core.autocrlf=false`、无 .gitattributes，提交后哈希不变。changelog 六行，以「· 」开头（和 App 把数组渲染成「· 」行的样式一致）。
+- **`kRepo` 还是 `OWNER/REPO` 占位**：`downloadUrls` 是 `https://github.com/OWNER/REPO/releases/tag/v1.4.0`，脚本给了警告。改好 `shu_schedule/lib/core/repo_config.dart` 的 `kRepo`
+  并重新生成之前，这份 `latest.json` 不能用（App 在占位状态下也不会去读它）；APK 只传 Releases，`latest.json` 和 `holidays.json` 同一次提交到仓库根 / `assets`。
+- 截图都在 `shots/v140/`（61 张）：B-（提醒，15）、C-（小组件，11）、D-（ICS，5）、E-（长按调休 / 空状态，10）、F-（1.3.1 → 1.4.0 升级验证，14）、X-（修复轮，6）。
+
+## v1.5.0 (2026-10-14)
+
+依据 `PLAN-1.5.md` 与两轮评审定稿的 `.tmpbuild/plan15/fixlist-1.5.md`（20 项）。核心目标：按用户产品反馈收敛——去掉没人看的入口和工程术语，该自动的自动。
+
+### 决策 D1–D10（含下午修订）
+- **D1**：删掉首次启动的隐私同意弹窗与 `AppSettings.privacyAcceptedVersion`；「隐私说明」页保留，换为白话短文（`assets/privacy.md`）。
+- **D2（下午修订）**：去掉底部导航栏与「今日」页；周课表铺满整屏作为首页，头部右上角加齿轮图标（`week-settings`）push 进入设置页；点击上课提醒通知 `popUntil(isFirst)` 回到课表本周。
+- **D3**：删掉长按桌面图标的三个快捷方式（`shortcuts.xml`、三张图标、字符串、Manifest meta-data 与 intent-filter、通道 action）。
+- **D4**：「添加桌面小组件」改为底部面板，含「当天课程 · 4×2」「下一节课 · 2×1」两张带预览图的卡片和「添加到桌面」按钮；底部按手机品牌给手动步骤；原生 `requestPinAppWidget` 传入 `PinResultReceiver` 回调弹 Toast 并回传 Dart 更新卡片状态。
+- **D5**：删掉单张课表文件分享 / 导入（课表管理「选择文件」「分享此课表」、设置「从文件导入课表」、空状态「打开同学分享的文件」及 `timetable_share.dart`）。
+- **D6**：备份保留但合并为一个入口「备份与恢复」，面板内含「导出备份文件」「从备份文件恢复」（恢复对话框按钮顺序「取消 / 覆盖 / 合并」，「合并」为主按钮，「覆盖」用危险色）。
+- **D7**：上课提醒页去术语，删「权限」分组，仅在缺通知权限或「闹钟和提醒」被关时显示条件提示卡（`ReminderProblem`）。
+- **D8（下午修订）**：开学日期自动化——① 教务识别到周次直接用；② 否则取覆盖今天或开学前 28 天内即将开学的学校校历作为默认，并在确认导入时弹面板确认；③ 都没有则弹不预选的「现在是第几周？」面板；手动新建课表或空状态首次加课时同样询问；周视图顶部「第 N 周 ▾」和学期设置「按当前周次设置」均可快速校正。
+- **D9**：校历建议一键套用面板（「按 ×× 校历」），在导入后回首页、启动时、假期表联网刷新带来本校本学期新建议时提示一键套用放假 / 调休。
+- **D10**：版本 `1.5.0+10`（`appVersion = '1.5.0'`）。
+
+### 各任务摘要（交接单在 `.tmpbuild/plan15/handoff-*.md`）
+- **A（壳层）**：删 `today_page.dart`、首次隐私同意框、图标快捷方式；空状态收敛为「从教务导入 / 手动添加」两个按钮；测试 613 → 590。
+- **B（设置与文案）**：设置页重排为「课表 / 显示 / 桌面 / 其他」四组；新增 `backup_sheet.dart` 合并备份入口；删单表分享；提醒页换条件提示卡；替换白话 `privacy.md`；测试 590 → 607。
+- **C（小组件添加面板）**：`MainActivity.kt` 支持 `day` / `next` 两个 provider 并挂 `PinResultReceiver`；新增 `widget_add_guide.dart` 按品牌给手动步骤，重写 `add_widget_helper.dart`；测试 607 → 646，Kotlin JVM 单测 24/24。
+- **A2（无底栏首页）**：去掉 `NavigationBar`，`HomeShell` 直出 `WeekViewPage`，右上角齿轮进设置，点通知回到课表本周；测试 646 → 649。
+- **D（开学日期与校历建议）**：新增 `term_resolver.dart`、`week_number_sheet.dart`、`calendar_suggestion_sheet.dart`；接入导入预览、周视图周次选择面板、学期设置「学校校历」与 `HomeShell` 三处触发点；正方周次探测追加 `AreaFive` 地址；测试 649 → 704。
+- **E（术语与收尾）**：统一「假期表」用词；启动通知权限按钮改为「去允许通知」；`restoreFrom` 备份路径只打日志不再触发设置页红卡；更新弹窗去掉 SHA-256；删无调用的 `nextCourse` / `nextCourseAt`；测试 704 → 705。
+
+### 两轮评审修复（`fixlist-1.5.md` 全部 20 项）
+1. **确认过的开学日期不再被校历推翻（F1-1）**：`AppSettings` 新增 `termStartConfirmed`，在教务识别导入、周次面板确认、周视图校正、学期设置改日期 / 选校历、校历面板一键套用、手动新建课表选周时写入；`calendarSuggestionDismissed` 改为按本校本学期条目指纹 `termKey = '<schoolId>|<term.startDate>|<entriesHash>'` 记录（「先不用」与「一键套用」均写入），顶层 `updatedAt` 或外校变更不再打扰，一键套用后用户删单条调休不再重弹；`deleteTimetable` 同步清理两张表。
+2. **开学前 28 天内导入支持校历（F1-2）**：`resolveTermStart` 新增 28 天即将开学窗口与 `upcoming` 标记，`showWeekNumberSheet` 支持顶部「还没开学（x月x日开学）」默认选项。
+3. **手动新建课表询问第几周（F1-3）**：课表管理「新建课表」与空状态首次「手动添加」保存前均弹出 `showWeekNumberSheet`；关掉面板按本周一暂定并弹 SnackBar 引导顶部校正；`ScheduleConfig.defaults()` 注释明确仅留给测试、示例课表与坏存档兜底。
+4. **周视图随开学日期 / 课表切换回到本周（F1-4）**：`_WeekViewPageState.build` 跟踪 `_seenStartDate` 与 `_seenTimetableId`，变化时重算 `_viewWeek` 并 `jumpToPage`。
+5. **预览页 `schoolId` 来源统一（F1-5）**：State 统一取 `r.schoolId ?? widget.adapter?.id` 供校历解析与 `applyImport` 共用。
+6. **消除真实 IO 时序偶发失败（F1-6）**：`test/helpers/harness.dart` 新增 `settleUntil`，替换写盘后弹 SnackBar 的固定轮数等待。
+7. **校正周次入口显眼化（F2-7）**：周视图顶部「第 N 周」右侧加 16px `Icons.expand_more`；⋮ 菜单项改为「选择 / 校正周次」；学期设置「按当前周次设置」副标题动态显示当前周次；关于页常见问题同步指向顶部「第 N 周」。
+8. **未配置更新源时隐藏死入口（F2-8）**：`!isConfigured` 时隐藏设置页「检查更新」与假期表页「联网更新假期表」按钮，反馈弹窗改为白话提示并去掉「开发中的版本」。
+9. **主题描述去色值（F2-9）**：「经典蓝」描述改为「沉稳的深蓝，正式清爽，清晰安排每一天。」，设置页「主题」副标题只显示主题名，全部主题描述无 `#` 色值。
+10. **学期设置「学校校历」优化（F2-10）**：移至「按当前周次设置」下方，标题拼学校名（如「上海大学校历」），点选弹带「撤销」的 SnackBar，保留用户自定义学期名，`schools.json` 学期名格式与 `holidays.json` 统一。
+11. **校历建议面板折叠旧条目与去重描述（F2-11）**：仅逐条列出今天及以后的条目，已过去的折叠为「另有 n 条已经过去的，也会一起补上」；每条优先显示 `note`、日期统一「9月20日 周日」；副文案改为「现在课表显示的是第 N 周」。
+12. **隐私说明统一「假期表」（F2-12）**：`assets/privacy.md` 第 3 条与 `PLAN-1.5.md` §3、测试断言同步改为「3. 更新假期表（和检查版本用同一个地址）。」。
+13. **关于页与提醒页白话（F2-13 / F2-14）**：关于页四句按现界面重写（右上角 ⋮、「一键导入课表」、去「后端服务器 / 应用目录」）；提醒页副标题、分组标题（「接下来的提醒」）与页脚白话化。
+14. **出错提示与「导入记录」白话（F2-15）**：反馈弹窗「Android 版本」→「系统版本」；`Storage` 损坏恢复统一白话提示（细节走 `debugPrint`）；假期表刷新失败 / 检查更新失败改为白话；`ZfsoftAdapter` 跳过脏数据的提醒合并去字段名；「诊断样本」统一改为「导入记录」。
+15. **课程门数按同名+同教师去重（F2-16）**：`Timetable.uniqueCourseCount` / `formatCourseCount` / `courseCountText`（「8 门课（每周 15 节）」），课表管理、导入确认按钮、导入 SnackBar、删除确认框统一使用。
+16. **恢复备份对话框按钮防误触（F2-17）**：按钮顺序改为「取消 / 覆盖 / 合并」，「合并」用 `FilledButton` 主按钮，「覆盖」文字用 `colorScheme.error`。
+17. **叫法与注释统一 + 小组件添加成功回传（F2-18 / F2-19 / F2-20）**：开学日期统一「9月14日（周一）」，4×2 卡片改为「当天课程 · 4×2」；Manifest 权限注释同步；`MainActivity.onPinned` + `PinResultReceiver` 回传 `onWidgetPinned` 到 `NativeBridge.pinned`，面板收到后显示「已添加到桌面 ✓」并取消手动行高亮。
+18. **文档清理**：根 `README.md`（含「给朋友装」）、`shu_schedule/README.md`（保持 CRLF）与 `site/index.html` 清理已删功能「分享此课表 / 从文件导入课表 / 今日页 / 图标快捷方式 / 首次隐私同意框」旧文案，补充 v1.5.0 说明与版本记录。
+
+### 验证与发布包
+- 静态检查与单测：`dart format --output=none --set-exit-if-changed lib test` → 0 changed；`flutter analyze` → `No issues found!`；`flutter test` 连跑两次均 **+720: All tests passed!**；Android 原生单测 `gradlew :app:testDebugUnitTest` → **BUILD SUCCESSFUL**（`WidgetTimeLogicTest` 24/24）。
+- 发布包（均未使用 `--split-per-abi`，`aapt2 dump badging` 核对两个包均为 `versionCode='10' versionName='1.5.0'`、`minSdkVersion:'24'`、`targetSdkVersion:'35'`，`apksigner verify` 均 `Verifies`）：
+
+| 文件 | 字节 | SHA-256 |
+|---|---|---|
+| `dist/简课表-v1.5.0.apk`（通用） | 59,315,446（56.6 MiB / 59.3 MB） | `9135df1a5053680d9b36e4dcc42a164c9fa1e1a33a79bbf566ddc81c4315f83d` |
+| `dist/简课表-v1.5.0-arm64.apk` | 21,726,732（20.7 MiB / 21.7 MB） | `635cae01f3ebe0e4520783aaa7864b99857b65fa8a4e17bb4a5799740d2e8788` |
+| `dist/latest.json` | 1,305 | `f7899ba95800772ef348fdff1b9dddf5309ce129f56eedde4b619ca0ba40d967` |
+
+### 遗留
+- 更新源 `kRepo` 仍为 `OWNER/REPO` 占位符：未配置时 App 自动隐藏「检查更新」与假期表手动刷新按钮、不发更新请求；正式建仓发布前替换 `lib/core/repo_config.dart` 并重跑 `tool/gen_latest.py`。
+- 正方周次探测新增的 `index_cxshjdAreaFive.html` 尚未在真实校园网教务环境实测。
+- 部分国产桌面（如小米 / vivo 某些版本）`requestPinAppWidget` 返回 `true` 但不弹系统框的情况无法在原生模拟器复现，已由面板手动步骤兜底。
+- 本次因电脑重启恢复后避免过热，未额外启动 Android 模拟器重拍截图（前期任务 C / build / R1 已在 `shots/v150/` 留存实机截图，本次改动全部由 720 条单元 / Widget 测试与 Kotlin 单测覆盖）。

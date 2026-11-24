@@ -257,14 +257,6 @@ class AppTheme {
         textColor: colors.onSurface,
       ),
       dividerTheme: DividerThemeData(color: colors.gridLine, space: 1),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: colors.surface,
-        surfaceTintColor: Colors.transparent,
-        indicatorColor: colors.primary.withValues(alpha: 0.16),
-        labelTextStyle: WidgetStatePropertyAll<TextStyle>(
-          TextStyle(fontSize: 12, color: colors.onSurface),
-        ),
-      ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: colors.surface,
         surfaceTintColor: Colors.transparent,

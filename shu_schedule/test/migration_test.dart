@@ -134,12 +134,12 @@ void main() {
       expect(Storage.backupVersionOf(<String, dynamic>{'version': 0}), 1);
     });
 
-    test('比当前还新的备份：不拒收，尽量读并给 warning', () {
+    test('比当前还新的备份：不拒收，尽量读并给白话 warning（技术细节走日志）', () {
       final v1 = jsonDecode(fixture('backup_v1.json')) as Map<String, dynamic>;
       final future = Storage.migrateBackupV1ToV2(v1)..['version'] = 99;
       final snap = Storage.importJson(jsonEncode(future));
       expect(snap.timetables.length, 2);
-      expect(snap.warnings.any((w) => w.contains('更新版本')), isTrue);
+      expect(snap.warnings, <String>[Storage.recoveryWarningText]);
     });
 
     test('exportJson 写 version 2，新字段完整往返', () {

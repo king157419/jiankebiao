@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>简课表 · 安卓课程表</title>
+<meta name="description" content="简课表是一个安卓课程表 App：在学校教务网页里登录，点一下就把本学期课表导进手机。无广告、无账号、不上传数据。">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://jiankebiao.vercel.app/">
+<meta property="og:title" content="简课表 · 安卓课程表">
+<meta property="og:description" content="在学校的教务网页里登录，点一下，这学期的课就进了手机。没有广告，不用注册，课表只存在自己手机里。">
+<meta property="og:image" content="https://jiankebiao.vercel.app/img/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+:root{
+  --paper:#f5f1e6;
+  --paper-2:#ede7d6;
+  --card:#fbf9f3;
+  --ink:#27231d;
+  --ink-2:#5b5347;
+  --ink-3:#6f6557;     /* 压纸色 5.06:1、压 paper-2 4.63:1 */
+  --line:#dcd4c0;
+  --blue:#1f4e9c;      /* App 默认主题主色 */
+  --blue-ink:#173c78;
+  --seal:#b3372b;      /* 全页只在标题印章用一次 */
+  --c1:#b8d8f2; --c2:#f4c4d4; --c3:#d5ecbb; --c4:#f0e4b1; --c5:#eac7f1; --c6:#f4d1af;
+  --serif:"Songti SC","STSong","Noto Serif SC","Source Han Serif SC","SimSun",serif;
+  --kai:"Kaiti SC","STKaiti","KaiTi","楷体",var(--serif);
+  --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 var(--sans);}
+a{color:var(--blue)}
+a:hover{color:var(--blue-ink)}
+img{max-width:100%;height:auto;display:block}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+code{font:0.9em ui-monospace,Consolas,monospace;background:var(--paper-2);padding:1px 5px;border-radius:4px;overflow-wrap:break-word;overflow-wrap:anywhere}
+
+/* 顶部 */
+header.top{padding:28px 0 0}
+.brand{display:flex;align-items:center;gap:12px}
+.brand img{width:44px;height:44px;border-radius:11px;box-shadow:0 1px 0 var(--line);background:var(--paper-2)}
+.brand b{font:600 20px/1 var(--serif);letter-spacing:.06em}
+.brand .ver{font-size:13px;color:var(--ink-3);margin-left:auto}
+
+/* 第一屏 */
+/* 只写上下内边距：左右留给 .wrap，否则平板宽度下文字贴边 */
+.hero{display:grid;grid-template-columns:1fr 1fr;grid-template-areas:"say art" "act art";column-gap:40px;align-items:center;padding-top:36px;padding-bottom:56px}
+.hero-say{grid-area:say;align-self:end}
+.hero-act{grid-area:act;align-self:start}
+.hero-art{grid-area:art;margin:0 -20px 0 0}
+.hero-art img{width:100%;aspect-ratio:1116/1024;object-fit:cover;border-radius:0 22px 22px 0;background:var(--paper-2)}
+.hero h1{font:600 clamp(34px,6vw,54px)/1.2 var(--serif);margin:0 0 20px;letter-spacing:.04em;display:flex;align-items:center;gap:14px}
+.seal{display:inline-grid;place-items:center;width:1.05em;height:1.05em;border:2px solid var(--seal);color:var(--seal);border-radius:6px;font:600 .52em/1 var(--kai);transform:rotate(-4deg)}
+.lead{font:400 clamp(18px,2.4vw,21px)/1.8 var(--kai);margin:0 0 14px;text-wrap:pretty}
+.sub{color:var(--ink-2);margin:0 0 16px}
+.scope{font-size:15px;line-height:1.7;color:var(--ink-2);border-left:3px solid var(--c1);padding:2px 0 2px 12px;margin:0 0 22px}
+.scope a,.nw{white-space:nowrap}
+.dl{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--blue);color:#fff;text-decoration:none;padding:13px 22px;border-radius:12px;font-weight:600}
+.btn:hover{background:var(--blue-ink);color:#fff}
+.btn small{font-weight:400;opacity:.85}
+.dl .more{display:inline-block;padding:10px 4px;font-size:14px;color:var(--ink-2)}
+.fine{margin:10px 0 0;font-size:13.5px;color:var(--ink-3);line-height:1.65}
+
+/* 手机框 */
+.phone{background:#fff;border:1px solid var(--line);border-radius:28px;padding:8px;box-shadow:0 18px 40px -22px rgba(60,45,20,.35);max-width:320px;margin:0 auto}
+.phone img{border-radius:21px}
+figcaption{font-size:13.5px;color:var(--ink-3);margin-top:12px;text-align:center;line-height:1.6}
+
+/* 分节 */
+section{padding:56px 0;border-top:1px solid var(--line)}
+h2{font:600 clamp(24px,3.4vw,30px)/1.35 var(--serif);margin:0 0 8px;letter-spacing:.03em}
+.h2-note{color:var(--ink-3);margin:0 0 30px;font-size:15px}
+h3{font:600 19px/1.4 var(--serif);margin:0 0 8px}
+p{margin:0 0 12px}
+
+.problem{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.problem div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px 12px}
+.problem b{display:block;font-family:var(--serif);font-size:17px;margin-bottom:4px}
+.problem p{color:var(--ink-2);font-size:15px}
+
+/* 功能：图文交错 */
+.feat{display:grid;grid-template-columns:260px 1fr;gap:44px;align-items:center;margin:0 0 56px}
+.feat:last-child{margin-bottom:0}
+.feat.flip{grid-template-columns:1fr 260px}
+.feat.flip figure{order:2}
+.feat figure{margin:0}
+.feat .phone{max-width:260px}
+.shot-card{border-radius:18px;max-width:320px;margin:0 auto}
+.feat ul{margin:8px 0 0;padding-left:1.2em;color:var(--ink-2)}
+.feat li{margin:4px 0}
+.tag{display:inline-block;font-size:12.5px;padding:1px 9px;border-radius:999px;background:var(--c1);color:#1d3557;margin-left:6px;vertical-align:2px;font-family:var(--sans);font-weight:500}
+.tag.b{background:var(--c3);color:#2f4a1d}
+.tag.c{background:var(--c6);color:#5a3414}
+.tag.d{background:var(--c5);color:#4a2a55}
+
+.minor{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:40px}
+.minor div{border-left:3px solid var(--c1);padding:2px 0 2px 14px;font-size:15px;color:var(--ink-2)}
+.minor div:nth-child(2){border-color:var(--c2)}
+.minor div:nth-child(3){border-color:var(--c3)}
+.minor div:nth-child(4){border-color:var(--c4)}
+.minor div:nth-child(5){border-color:var(--c5)}
+.minor div:nth-child(6){border-color:var(--c6)}
+.minor b{color:var(--ink);display:block;font-weight:600}
+
+/* 隐私 */
+.privacy{display:grid;grid-template-columns:1fr 260px;gap:44px;align-items:start}
+.privacy dl{margin:0}
+.privacy dt{font:600 17px/1.5 var(--serif);margin-top:18px}
+.privacy dt:first-child{margin-top:0}
+.privacy dd{margin:4px 0 0;color:var(--ink-2)}
+
+/* 安装 */
+.steps{counter-reset:s;list-style:none;padding:0;margin:0 0 24px}
+.steps li{counter-increment:s;position:relative;padding:0 0 14px 42px}
+.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:28px;height:28px;border-radius:50%;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;font:600 14px/1 var(--serif)}
+/* padding 放在 summary 上，整块都能点开 */
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:0 0 10px}
+details[open]{padding-bottom:14px}
+summary{cursor:pointer;font-weight:600;padding:12px 16px}
+details p,details ul{margin:0 16px;color:var(--ink-2);font-size:15px}
+details p+p{margin-top:10px}
+details ul{padding-left:1.2em}
+.warn{background:var(--paper-2);border-radius:12px;padding:14px 16px;font-size:15px;color:var(--ink-2);margin-top:18px}
+
+/* 限制、历史 */
+.limits{margin:0;padding-left:1.3em}
+.limits li{margin:6px 0}
+.log{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.log li{padding:0 0 18px 20px;position:relative}
+.log li::before{content:"";position:absolute;left:-6px;top:9px;width:10px;height:10px;border-radius:50%;background:var(--paper);border:2px solid var(--ink-3)}
+.log li:first-child::before{background:var(--blue);border-color:var(--blue)}
+.log b{font-family:var(--serif)}
+.log span{color:var(--ink-3);font-size:14px;margin-left:6px}
+.log p{color:var(--ink-2);font-size:15px;margin:2px 0 0}
+
+footer{border-top:1px solid var(--line);padding:28px 0 48px;color:var(--ink-3);font-size:13.5px}
+
+@media (max-width:820px){
+  .hero{grid-template-columns:1fr;grid-template-areas:"say" "art" "act";padding-top:32px}
+  .hero-say{align-self:auto}
+  .hero-art{margin:0 -20px 22px;}
+  .hero-art img{aspect-ratio:16/10;object-position:52% 40%;border-radius:0}
+  .problem{grid-template-columns:1fr}
+  .feat,.feat.flip,.privacy{grid-template-columns:1fr;gap:22px}
+  .feat.flip figure{order:0}
+  .feat .phone,.privacy .phone{max-width:250px}
+  .minor{grid-template-columns:1fr 1fr}
+  section{padding:44px 0}
+}
+@media (max-width:480px){
+  .wrap{padding-left:16px;padding-right:16px}
+  .hero{padding-top:24px}
+  .hero h1{margin-bottom:12px}
+  .lead{margin-bottom:12px}
+  .hero-art{margin:0 -16px 18px}
+  .hero-art img{aspect-ratio:16/9}
+  .minor{grid-template-columns:1fr}
+  .btn{width:100%;justify-content:center}
+  .brand .ver,.brand b{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap brand">
+    <img src="img/icon.png" alt="" width="44" height="44">
+    <b>简课表</b>
+    <span class="ver">v1.3.0 · 2026 年 9 月</span>
+  </div>
+</header>
+
+<main>
+<div class="wrap hero">
+  <div class="hero-say">
+    <h1>简课表 <span class="seal" aria-hidden="true">简</span></h1>
+    <p class="lead">简课表是一个安卓课程表 App：在学校的教务网页里登录，点一下，这学期的课就<span class="nw">进了手机</span>。</p>
+  </div>
+  <figure class="hero-art">
+    <img src="img/hero.jpg" srcset="img/hero-720.jpg 720w, img/hero.jpg 1116w" sizes="(max-width:820px) 100vw, 520px" width="1116" height="1024" fetchpriority="high" decoding="async" alt="手绘淡彩插画：早晨的书桌上立着一部手机，屏幕里是彩色格子的周课表，今天那一列是淡蓝色；旁边有一张彩色便签、一杯冒热气的豆浆和一本摊开的课本，窗外是校园的树">
+  </figure>
+  <div class="hero-act">
+    <p class="sub">不用再一格一格手抄。没有广告，不用注册，也没有服务器，课表只存在你自己的手机里。</p>
+    <p class="scope">一键导入只支持正方新版教务（网址里带 /jwglxt），目前只在上海大学实际验证过。导不进来也可以手动录入，一学期大约十分钟。<a href="#limits">我的学校能用吗？</a></p>
+    <div class="dl">
+      <a class="btn" href="jiankebiao-v1.3.0-arm64.apk" download>下载安卓安装包 <small>21.1 MB</small></a>
+      <a class="more" href="#install">装不上？看安装指引</a>
+    </div>
+    <p class="fine">2018 年以后的安卓手机基本都能装；纯血鸿蒙要借卓易通，还没实测过；iPhone 装不了。个人开发，不是学校官方出品。</p>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <h2>不用再对着教务网页一格一格抄</h2>
+    <p class="h2-note">课表本来就在教务系统里，问题是它只在网页上。</p>
+    <div class="problem">
+      <div><b>以前</b><p>登录教务，截一张课表图，再打开课程表 App，把每门课的名字、教室、节次、单双周一格一格抄进去。</p></div>
+      <div><b>现在</b><p>在 App 里打开学校的登录页，用自己的账号登录，点「一键导入课表」。导入前有预览页，可以逐项核对。</p></div>
+      <div><b>导不进来</b><p>手动录也很快，一学期大约十分钟。录入界面专门为连续录课做过。</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>主要功能</h2>
+    <p class="h2-note">下面的截图都来自 v1.3.0。</p>
+
+    <div class="feat flip">
+      <figure><div class="phone"><img src="img/week.jpg" width="720" height="1600" loading="lazy" alt="周课表：周一到周日七列，今天所在的周三整列高亮，左侧 1 到 12 节带上下课时间，午间、晚间休息带单独画出"></div></figure>
+      <div>
+        <h3>周课表 <span class="tag b">一周七列</span></h3>
+        <p>周一到周日一屏排开，今天那一列整列高亮。左边是 1 到 12 节和每节的上下课时间，蓝色的时间标记就是「此刻」。午间、晚间休息带单独画出来。</p>
+        <p style="color:var(--ink-3);font-size:14px;margin-top:12px">截图用的是示例课表。</p>
+      </div>
+    </div>
+
+    <div class="feat">
+      <figure><div class="phone"><img src="img/school.jpg" width="720" height="960" loading="lazy" alt="导入课表页：顶部搜索学校，列表里上海大学带「已验证」标签，最下面是「我的学校不在列表」"></div></figure>
+      <div>
+        <h3>教务一键导入 <span class="tag">正方新版教务</span></h3>
+        <p>选学校可以按校名、拼音或拼音首字母搜索。标「已验证」的学校是开发者实际走通过的；不在列表里的学校，输入教务系统的网址，App 认出是正方新版教务（网址里有 <code>/jwglxt</code>）就按实验模式试。</p>
+        <ul>
+          <li>账号密码直接发给学校，App 不读取、不保存；短信验证码、滑块在页面里照常完成。</li>
+          <li>学校支持企业微信、微信、QQ 扫码登录的，点按钮会跳到对应 App 确认。</li>
+          <li>导入后默认清掉教务网页的登录状态，别人拿到你的手机也进不了教务。</li>
+          <li>预览页会提醒你核对姓名、学期、开学日期和被跳过的课。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="feat flip">
+      <figure><div class="phone"><img src="img/editor.jpg" width="720" height="1600" loading="lazy" alt="新建课程页下半部分：周次 1 到 18 的选择格、颜色选择、备注，底部是「添加课程」和「保存并继续添加」两个按钮"></div></figure>
+      <div>
+        <h3>导不进来，也能很快录完 <span class="tag b">手动录入</span></h3>
+        <p>暂时不支持一键导入的学校，手动录入一学期大约十分钟，界面专门为连续录课做过：</p>
+        <ul>
+          <li>在周课表上长按空格子，直接新建这一天、这一节的课。</li>
+          <li>「保存并继续添加」：保留星期、节次、周次，只清空课名、教师和教室。</li>
+          <li>「复制到其他星期」：一门课一周上几次，勾上几天一次生成。</li>
+          <li>教师、教室输入时提示本课表里用过的值。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="feat">
+      <figure><div class="phone"><img src="img/cancelled.jpg" width="720" height="1600" loading="lazy" alt="周课表：周三日期下方标着红色「停课」，这一列的课全部不显示"></div></figure>
+      <div>
+        <h3>调休和停课，按日期设一次 <span class="tag c">1.3.0 新增</span></h3>
+        <p>国庆后的周六「按周一的课上」、运动会停课、某天补第 7 周的课，在学期设置里按日期加一条就行。</p>
+        <ul>
+          <li>三种写法：停课；按某个星期上课（可同时指定第几周）；指定周次。导入后也会按学校校历提示一键套用。</li>
+          <li>周课表的列头会标「休」或「补」，长按列头即可快速设置。</li>
+          <li>桌面小组件和上课提醒跟着一起变。</li>
+        </ul>
+        <p style="color:var(--ink-3);font-size:14px;margin-top:12px">截图里把 9 月 23 日（周三）设成了停课，这一列就空了。</p>
+      </div>
+    </div>
+
+    <div class="feat flip">
+      <figure><img class="shot-card" src="img/widget-card.jpg" width="718" height="479" loading="lazy" alt="简课表桌面小组件（截图只保留了小组件本身）：标题「9月23日 周三，第 2 周 · 今天」，左右箭头切换日期，中间写着「这天没有课，好好休息」"></figure>
+      <div>
+        <h3>桌面小组件 <span class="tag d">当天课程</span></h3>
+        <p>小组件显示某一天的全部课程，◀ ▶ 切换日期，课多了上下滑动，也可以把它拉高。每天 0 点自动换到新的一天。</p>
+        <ul>
+          <li>在「设置 → 添加桌面小组件」面板里，4×2「当天课程」和 2×1「下一节课」都能一键弹出系统的「添加到桌面」。</li>
+          <li>弹不出确认框的桌面，面板底部会按手机品牌给出手动添加步骤。</li>
+        </ul>
+        <p style="color:var(--ink-3);font-size:14px;margin-top:12px">截图这天被设成了停课，所以小组件显示没课。系统限制小组件最快约 30 分钟刷新一次，打开一次 App 会立刻刷新。</p>
+      </div>
+    </div>
+
+    <div class="minor">
+      <div><b>单双周与「此刻」</b>正在上的课带进度，非本周的课可以半透明显示。</div>
+      <div><b>作息随便改</b>逐节改上下课时间，午间、晚间休息带按作息自动画出。</div>
+      <div><b>多张课表</b>新建、切换、重命名，每张都能单独导出日历。</div>
+      <div><b>6 套主题</b>课表和小组件一起换色。</div>
+      <div><b>备份</b>全部课表和设置导出成一个 JSON 文件，换手机前先导一份。</div>
+      <div><b>检查更新</b>每天最多一次，有新版只提示并打开浏览器下载页。</div>
+    </div>
+  </div>
+</section>
+
+<section id="privacy">
+  <div class="wrap privacy">
+    <div>
+      <h2>隐私</h2>
+      <p class="h2-note">简课表只在你的手机上运行，「设置 → 隐私说明」随时可以查看全文。</p>
+      <dl>
+        <dt>不上传</dt>
+        <dd>没有服务器、没有账号、没有广告和统计 SDK。课表、作息、设置只存在 App 的私有目录里，卸载即全部删除。</dd>
+        <dt>只在三种情况下联网</dt>
+        <dd>你主动「从教务导入」时打开学校的教务网页；每天最多一次检查新版本与更新假期表，只下载两个很小的文件，不带任何个人数据，但对方能看到你的 IP。学校清单内置在安装包里。</dd>
+        <dt>权限</dt>
+        <dd>主要只用联网、通知（发上课提醒）和闹钟提醒（让提醒准点）。没有存储、相机、位置、通讯录权限。</dd>
+        <dt>导入失败时的导入记录</dt>
+        <dd>在你手机上把学号、手机号、姓名替换成 <code>***</code> 后生成文件，发不发、发给谁由你决定，App 不会自动上传。</dd>
+      </dl>
+    </div>
+    <figure style="margin:0"><div class="phone"><img src="img/privacy.jpg" width="720" height="1600" loading="lazy" alt="首次启动的隐私说明对话框，底部是「不同意并退出」和「同意」"></div><figcaption>首次启动的隐私说明</figcaption></figure>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>安装</h2>
+    <p class="h2-note">不是从应用商店装的，系统会拦一下。下面是摘要，菜单名随系统版本可能略有不同。</p>
+    <ol class="steps">
+      <li>用手机浏览器点上面的下载按钮，下载 <code>jiankebiao-v1.3.0-arm64.apk</code>。</li>
+      <li>点开 APK。提示「不允许安装来自此来源的应用」时点「设置」，打开「允许来自此来源」，返回继续。这个开关只给打开 APK 的那个 App（浏览器或文件管理），装完可以关掉。</li>
+      <li>提示「此应用未经检测 / 可能有风险」是所有商店外 APK 的通用提示，选「仍然安装」。</li>
+      <li>打开 App，直接从首页「从教务导入」开始。</li>
+    </ol>
+
+    <details open>
+      <summary>华为 / 荣耀：先退出纯净模式</summary>
+      <ul>
+        <li>EMUI 12、HarmonyOS 2 到 4 默认开着「纯净模式」，会直接拦下商店外的应用。到「设置 → 系统和更新 → 纯净模式」点「退出」（部分版本在「设置 → 安全」里），装完可以再打开。</li>
+        <li>再到「设置 → 安全 → 更多安全设置 → 外部来源应用下载」，给用来打开 APK 的 App 打开开关。</li>
+      </ul>
+    </details>
+    <details>
+      <summary>华为纯血鸿蒙（HarmonyOS 5.0 及以后）：借卓易通</summary>
+      <ul>
+        <li>纯血鸿蒙（包括 6、7）自己不能装 APK，要借华为的「卓易通」。版本号在「设置 → 关于手机」里看，4.x 及更早的版本按上面华为 / 荣耀的办法装。</li>
+        <li>在华为「应用市场」搜「卓易通」装上，第一次打开按提示走完。再点开下载好的 APK，由卓易通安装，装好后在卓易通里打开简课表。能不能装以卓易通的判定为准。</li>
+        <li>简课表在卓易通里还没实测过：能不能正常打开、一键导入和桌面小组件能不能用，都还不知道。一键导入用不了时，可以直接手动录入课程（或从同班安卓同学在「设置 → 备份与恢复」导出的备份文件合并恢复）。</li>
+      </ul>
+    </details>
+    <details>
+      <summary>小米 / 红米（MIUI、HyperOS）</summary>
+      <p>提示风险时选「继续安装」，可能要等几秒或登录小米账号。也可以在「设置 → 隐私保护 → 特殊权限 → 安装未知应用」里给对应的 App 打开。</p>
+    </details>
+    <details>
+      <summary>OPPO / 一加 / realme（ColorOS）</summary>
+      <p>安装时会做「安全检测」，扫完点「继续安装」。被拦的话，在「设置 → 安全 → 安装外部来源应用」里打开。</p>
+    </details>
+    <details>
+      <summary>vivo / iQOO（OriginOS）</summary>
+      <p>「设置 → 安全与隐私 → 更多安全设置 → 安装未知应用」，给对应的 App 打开；提示风险选「继续安装」。</p>
+    </details>
+    <details>
+      <summary>校验与兼容</summary>
+      <p>安装包的 SHA-256：<code>4a99d27a30e91c5e10a57978786b2da85c8c20e84c35e9a9bcfee2bea8d78fc6</code>。自己算一遍，和这里一致，就说明下载完整、中途没被改过。</p>
+      <p>这个安装包只含 arm64 版本，2018 年以后的安卓手机基本都能装。要是提示「解析包错误」，说明手机比较老，要用 58 MB 的通用包，通用包暂时没有公开下载。</p>
+    </details>
+    <details>
+      <summary>从「上大课表」升级</summary>
+      <p>1.0 到 1.2 叫「上大课表」，1.3.0 起改名「简课表」，包名还是原来的 <code>cn.shu.schedule</code>。直接安装新版覆盖，课表、主题、设置都保留。请一直用同一个来源的安装包：签名不同的包系统会要求先卸载旧版，卸载会清空课表，遇到这种情况先在「设置 → 导出备份」。</p>
+    </details>
+
+    <div class="warn">导入时提示「请求教务接口失败」或网页打不开，多半是网络：不少学校在校外访问教务要连学校 VPN，连上校园网或 VPN 再试。</div>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="wrap">
+    <h2>已知限制</h2>
+    <p class="h2-note">装之前值得知道的几件事。</p>
+    <ol class="limits">
+      <li>只有 Android 版，没有鸿蒙原生版，也没有 iPhone 版。纯血鸿蒙可以借卓易通装（见<a href="#install">安装</a>一节），还没实测过。iPhone 装不了，可以请用简课表的安卓同学在「设置 → 导出到日历（.ics）」生成日历文件发给你，导入 iPhone 自带的「日历」；这只是一份快照，调课后要重新导。</li>
+      <li>一键导入目前只内置了正方新版教务（<code>jwglxt</code>），<b>只有上海大学经过实际验证</b>。其他使用正方新版的学校可以试，强智、青果、URP 等系统还不支持，请手动录入。</li>
+      <li>没有云同步。上课提醒只排接下来 14 天，打开 App 会自动往后补上；App 内置「导出到日历（.ics）」，导出的是一份快照。</li>
+      <li>检查更新只提示并打开浏览器，不在 App 内下载安装（那需要额外的「安装未知应用」权限）。</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>版本历史</h2>
+    <p class="h2-note">1.0 到 1.2 名叫「上大课表」。</p>
+    <ul class="log">
+      <li><b>1.5.0</b><span>2026-10-14</span><p>周课表全屏作为首页、右上角齿轮进设置（去掉底栏、今日页、首次隐私同意框、图标快捷方式与单张课表文件分享）；开学日期自动化与顶部「第 N 周 ▾」快速校正；按学校校历一键套用放假 / 调休；双卡片添加小组件面板（附各品牌手动步骤）；备份与恢复合一；文案全面白话化。</p></li>
+      <li><b>1.4.0</b><span>2026-10-07</span><p>上课提醒（本机通知 + 明日预告）；小组件头部显示上课状态、课上完自动看明天，新增 2×1「下一节课」；导出到日历（.ics）；周课表长按列头设调休 / 停课；假期表随检查更新联网刷新。</p></li>
+      <li><b>1.3.0</b><span>2026-09</span><p>改名「简课表」，面向所有学校：学校清单与「我的学校不在列表」、扫码登录外跳、导入后清除教务登录态、导入记录脱敏导出；调休 / 停课；录入提效（保存并继续、复制到其他星期、历史补全、长按空格新建）；休息带按作息推导；小组件覆盖整学期；检查更新；隐私说明；反馈入口。</p></li>
+      <li><b>1.2.0</b><span>2026-09-17</span><p>小组件合并为一个可翻页、可滑动的「当天课程」；App 内一键添加小组件；长按图标快捷方式。</p></li>
+      <li><b>1.1.0</b><span>2026-09-17</span><p>课表视觉重做（课程块排版、「此刻」进度），新增两个小组件。</p></li>
+      <li><b>1.0.3</b><span>2026-09-16</span><p>课程块改成名字靠上、教室靠下。</p></li>
+      <li><b>1.0.2</b><span>2026-09-16</span><p>修复课程名截断。</p></li>
+      <li><b>1.0.1</b><span>2026-09-16</span><p>真机反馈修复（统一身份认证明文跳转等），首次在真实校园网上跑通导入。</p></li>
+      <li><b>1.0.0</b><span>2026-09</span><p>「上大课表」首个版本：上海大学教务一键导入、周课表、今日页、桌面小组件、主题、备份。</p></li>
+    </ul>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    简课表 v1.3.0，个人开发，不是学校官方出品。截图来自 v1.3.0 模拟器，课表与教师名都是 App 内置的演示数据。<br>
+    问题反馈：App 内「设置 → 反馈」可复制诊断信息（App 版本、Android 版本、机型，不含课表）。
+  </div>
+</footer>
+</body>
+</html>

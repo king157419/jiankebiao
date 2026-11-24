@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.4.0「下一节」2×1 小组件：正在上 / 下一节 / 明天第一节，一节课三行字。
+     最小 110dp × 40dp（官方尺寸表里 2×1 的下限），可横竖拉伸。
+     刷新：updatePeriodMillis 30 分钟兜底 + NextWidgetProvider 自己的每日 00:00:30 闹钟
+     + 每次渲染后按「下一节开始 / 结束、跨天」重排的非精确闹钟（都不唤醒设备）。
+     v1.5.0 起和 4×2 一样能在 App 里「设置 → 添加桌面小组件」一键添加，也能从桌面小组件列表里拖。
+     previewLayout / description / targetCell* 只在 API 31+ 生效，更老的启动器看 previewImage。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_next"
+    android:previewLayout="@layout/widget_next_preview"
+    android:previewImage="@drawable/widget_next_preview"
+    android:description="@string/widget_next_description"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

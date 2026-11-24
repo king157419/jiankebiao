@@ -21,6 +21,22 @@ Future<void> settleWithRealIo(WidgetTester tester, {int rounds = 20}) async {
   }
 }
 
+/// 轮询真实文件 IO，直到 [finder] 出现在界面上（或达到 [maxRounds] 上限）。
+/// 用于「写盘完成后才弹 SnackBar」的用例，避免全量并行跑时固定轮数不够导致偶发超时。
+Future<void> settleUntil(
+  WidgetTester tester,
+  Finder finder, {
+  int maxRounds = 100,
+}) async {
+  for (var i = 0; i < maxRounds; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump();
+    if (finder.evaluate().isNotEmpty) return;
+  }
+}
+
 /// 每个测试一个临时存储目录。
 class TempStorage {
   late Directory dir;

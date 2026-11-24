@@ -50,7 +50,10 @@ class ScheduleConfig {
            : Map<String, DateOverride>.from(overrides),
        breakAfter = breakAfter == null ? null : _normalizeBreaks(breakAfter);
 
-  /// 内置默认配置：第一个示例学期 + 12 节示例作息。
+  /// 内置示例配置：第一个示例学期 + 12 节示例作息。
+  ///
+  /// v1.5.0 起**只保留给测试、示例课表和坏存档兜底用**；真实用户新建课表会问
+  /// 「现在是第几周？」（关掉面板也按当天所在周周一暂定），不再拿固定日期当默认。
   factory ScheduleConfig.defaults() {
     final preset = exampleTermPresets.first;
     return ScheduleConfig(

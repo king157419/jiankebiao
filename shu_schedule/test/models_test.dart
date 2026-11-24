@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shu_schedule/core/app_state.dart';
 import 'package:shu_schedule/core/storage.dart';
@@ -95,6 +96,53 @@ void main() {
       );
       expect(back.showTimeInGrid, isTrue);
     });
+
+    test(
+      'v1.5.0 calendarSuggestionDismissed：往返；旧存档缺字段 / 不是对象 / 值不是字符串 → 空表',
+      () {
+        final s = AppSettings.defaults();
+        expect(s.calendarSuggestionDismissed, isEmpty);
+        s.calendarSuggestionDismissed['tt'] = '2026-10-06|2026-09-14';
+        final back = AppSettings.fromJson(jsonDecode(jsonEncode(s.toJson())));
+        expect(back.calendarSuggestionDismissed, <String, String>{
+          'tt': '2026-10-06|2026-09-14',
+        });
+        // copyWith 不传时沿用，传了就换。
+        expect(back.copyWith().calendarSuggestionDismissed, <String, String>{
+          'tt': '2026-10-06|2026-09-14',
+        });
+        expect(
+          back
+              .copyWith(calendarSuggestionDismissed: const <String, String>{})
+              .calendarSuggestionDismissed,
+          isEmpty,
+        );
+
+        for (final raw in <Object?>[null, 'x', 3, <Object?>[]]) {
+          final json = <String, dynamic>{
+            'themeId': 'mint',
+            'settingsVersion': 2,
+          };
+          if (raw != null) json['calendarSuggestionDismissed'] = raw;
+          final parsed = AppSettings.fromJson(json);
+          expect(parsed.calendarSuggestionDismissed, isEmpty, reason: '$raw');
+          expect(parsed.themeId, 'mint');
+        }
+        final mixed = AppSettings.fromJson(<String, dynamic>{
+          'calendarSuggestionDismissed': <String, dynamic>{
+            'a': '2026-10-06|2026-09-14',
+            'b': 1,
+            'c': null,
+          },
+        });
+        expect(mixed.calendarSuggestionDismissed, <String, String>{
+          'a': '2026-10-06|2026-09-14',
+        });
+        // 读出来的表可以改（AppState.dismissCalendarSuggestion 直接往里写）。
+        mixed.calendarSuggestionDismissed['d'] = 'x';
+        expect(mixed.calendarSuggestionDismissed, hasLength(2));
+      },
+    );
   });
 
   group('脏 JSON 不崩溃', () {
@@ -280,9 +328,20 @@ void main() {
           Timetable.empty(id: 'rescued', name: '抢救回来的').toJson(),
         ]),
       );
-      final snap = await Storage.load();
+      final logs = <String>[];
+      final originalDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) logs.add(message);
+      };
+      late final StorageSnapshot snap;
+      try {
+        snap = await Storage.load();
+      } finally {
+        debugPrint = originalDebugPrint;
+      }
       expect(snap.timetables.single.name, '抢救回来的');
-      expect(snap.warnings.any((w) => w.contains('临时文件')), isTrue);
+      expect(snap.warnings, <String>[Storage.recoveryWarningText]);
+      expect(logs.any((l) => l.contains('临时文件')), isTrue);
     });
 
     test('主文件存在时不会被 .tmp 覆盖', () async {
@@ -411,26 +470,43 @@ void main() {
       expect(state.currentTimetable, isNull);
     });
 
-    test('restoreFrom：覆盖前留了一份 before-restore 备份', () async {
+    test('restoreFrom：覆盖前留了一份 before-restore 备份；路径只打日志，不进 warnings', () async {
       final state = AppState();
       await state.load();
       await state.createTimetable(name: '会被覆盖掉的');
       await Storage.flushPendingWrites();
 
-      await state.restoreFrom(
-        StorageSnapshot(
-          timetables: <Timetable>[Timetable.empty(id: 'new', name: '恢复进来的')],
-          settings: AppSettings(currentTimetableId: 'new'),
-        ),
-      );
+      final logs = <String>[];
+      final originalDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) logs.add(message);
+      };
+      try {
+        await state.restoreFrom(
+          StorageSnapshot(
+            timetables: <Timetable>[Timetable.empty(id: 'new', name: '恢复进来的')],
+            settings: AppSettings(currentTimetableId: 'new'),
+          ),
+        );
+      } finally {
+        debugPrint = originalDebugPrint;
+      }
       expect(state.currentTimetable!.name, '恢复进来的');
 
       final backups = dir
           .listSync()
           .where((e) => e.path.contains('.before-restore-'))
           .toList();
-      expect(backups, isNotEmpty);
-      expect(state.warnings.any((w) => w.contains('已备份')), isTrue);
+      expect(backups, hasLength(1));
+      // v1.5.0 任务 E：warnings 会变成设置页顶部的红卡「读取数据时发现问题」，
+      // 本机备份路径对学生是噪音，只写进日志。
+      expect(state.warnings, isEmpty);
+      expect(
+        logs.where(
+          (l) => l.contains('已备份到') && l.contains(backups.single.path),
+        ),
+        hasLength(1),
+      );
     });
 
     test('restoreFrom：备份里的重复 id 会被修掉', () async {
@@ -447,6 +523,131 @@ void main() {
       );
       final ids = state.timetables.map((t) => t.id).toSet();
       expect(ids.length, 2);
+    });
+
+    test('deleteTimetable：清掉对应课表的 calendarSuggestionDismissed 与 termStartConfirmed', () async {
+      final state = AppState();
+      await state.load();
+      final a = await state.createTimetable(
+        name: '表A',
+        confirmTermStart: true,
+        today: DateTime(2026, 9, 14),
+      );
+      final b = await state.createTimetable(
+        name: '表B',
+        confirmTermStart: true,
+        today: DateTime(2026, 9, 21),
+      );
+      await state.dismissCalendarSuggestion(a.id, 'shu|2026-09-14|abc');
+      await state.dismissCalendarSuggestion(b.id, 'shu|2026-09-21|def');
+
+      expect(state.settings.termStartConfirmed.containsKey(a.id), isTrue);
+      expect(
+        state.settings.calendarSuggestionDismissed.containsKey(a.id),
+        isTrue,
+      );
+
+      await state.deleteTimetable(a.id);
+      expect(state.settings.termStartConfirmed.containsKey(a.id), isFalse);
+      expect(
+        state.settings.calendarSuggestionDismissed.containsKey(a.id),
+        isFalse,
+      );
+      expect(state.settings.termStartConfirmed[b.id], '2026-09-21');
+      expect(
+        state.settings.calendarSuggestionDismissed[b.id],
+        'shu|2026-09-21|def',
+      );
+    });
+  });
+
+  group('v1.5.0 AppSettings 字段兼容与课程门数去重', () {
+    test('旧 settings.json 无 calendarSuggestionDismissed 和 termStartConfirmed 能正常读出，往返与备份保留', () {
+      final legacy = AppSettings.fromJson(<String, dynamic>{
+        'currentTimetableId': 'tt1',
+        'themeId': 'shu',
+        'settingsVersion': 2,
+      });
+      expect(legacy.calendarSuggestionDismissed, isEmpty);
+      expect(legacy.termStartConfirmed, isEmpty);
+
+      final withConfirmed = legacy.copyWith(
+        calendarSuggestionDismissed: <String, String>{
+          'tt1': 'shu|2026-09-14|f7a6efff43406cf1',
+        },
+        termStartConfirmed: <String, String>{'tt1': '2026-09-21'},
+      );
+      final snap = Storage.importJson(
+        Storage.exportJson(<Timetable>[
+          Timetable.empty(id: 'tt1', name: '课表'),
+        ], withConfirmed),
+      );
+      expect(snap.settings.calendarSuggestionDismissed, <String, String>{
+        'tt1': 'shu|2026-09-14|f7a6efff43406cf1',
+      });
+      expect(snap.settings.termStartConfirmed, <String, String>{
+        'tt1': '2026-09-21',
+      });
+    });
+
+    test('Timetable.courseCountText：同名 + 同教师算一门，多时段补上每周节数', () {
+      expect(Timetable.empty(id: 'e').courseCountText, '0 门课');
+
+      final singleSlots = Timetable(
+        id: 't1',
+        name: '单时段',
+        config: ScheduleConfig.defaults(),
+        courses: <Course>[
+          Course(
+            id: '1',
+            name: '高等数学',
+            teacher: '张老师',
+            day: 1,
+            startPeriod: 1,
+            endPeriod: 2,
+          ),
+          Course(
+            id: '2',
+            name: '高等数学',
+            teacher: '李老师',
+            day: 3,
+            startPeriod: 1,
+            endPeriod: 2,
+          ),
+        ],
+      );
+      expect(Timetable.uniqueCourseCount(singleSlots.courses), 2);
+      expect(singleSlots.courseCountText, '2 门课');
+
+      // 8 门不同课程，共 15 个时段 →「8 门课（每周 15 节）」
+      final courses = <Course>[
+        for (var i = 1; i <= 8; i++)
+          Course(
+            id: 'a$i',
+            name: '课程$i',
+            teacher: '教师$i',
+            day: 1,
+            startPeriod: 1,
+            endPeriod: 2,
+          ),
+        for (var i = 1; i <= 7; i++)
+          Course(
+            id: 'b$i',
+            name: '课程$i',
+            teacher: '教师$i',
+            day: 4,
+            startPeriod: 3,
+            endPeriod: 4,
+          ),
+      ];
+      final multi = Timetable(
+        id: 't2',
+        name: '多时段',
+        config: ScheduleConfig.defaults(),
+        courses: courses,
+      );
+      expect(Timetable.uniqueCourseCount(courses), 8);
+      expect(multi.courseCountText, '8 门课（每周 15 节）');
     });
   });
 }
